@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kairos Review Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #e0e0e0;
+            min-height: 100vh;
+        }
+        .header {
+            background: #16213e;
+            padding: 1rem 2rem;
+            border-bottom: 1px solid #0f3460;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .header h1 { font-size: 1.4rem; color: #e94560; }
+        .header .queue-badge {
+            background: #e94560;
+            color: white;
+            padding: 0.3rem 0.8rem;
+            border-radius: 12px;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+        .container { max-width: 900px; margin: 0 auto; padding: 2rem; }
+
+        /* Empty state */
+        .empty-state {
+            text-align: center;
+            padding: 4rem 2rem;
+            color: #888;
+        }
+        .empty-state h2 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+
+        /* Video player */
+        .video-section {
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 1.5rem;
+            max-height: 500px;
+            display: flex;
+            justify-content: center;
+        }
+        .video-section video {
+            max-width: 100%;
+            max-height: 500px;
+        }
+
+        /* Info cards */
+        .info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .info-card {
+            background: #16213e;
+            border-radius: 8px;
+            padding: 1rem 1.2rem;
+            border: 1px solid #0f3460;
+        }
+        .info-card h3 {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            color: #888;
+            margin-bottom: 0.5rem;
+            letter-spacing: 0.05em;
+        }
+        .info-card .value { font-size: 1.1rem; color: #e0e0e0; }
+        .info-card .value.highlight { color: #e94560; font-weight: 600; }
+
+        /* Stats row */
+        .stats-row {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+        }
+        .stat-badge {
+            background: #16213e;
+            border: 1px solid #0f3460;
+            border-radius: 6px;
+            padding: 0.5rem 1rem;
+            font-size: 0.85rem;
+            white-space: nowrap;
+        }
+        .stat-badge .label { color: #888; }
+        .stat-badge .val { color: #e0e0e0; font-weight: 600; }
+        .stat-badge.pass { border-color: #2ecc71; }
+        .stat-badge.fail { border-color: #e74c3c; }
+
+        /* Actions */
+        .actions-section {
+            background: #16213e;
+            border-radius: 8px;
+            padding: 1.5rem;
+            border: 1px solid #0f3460;
+            margin-bottom: 1.5rem;
+        }
+        .actions-section h3 {
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            color: #888;
+            margin-bottom: 1rem;
+        }
+        .action-buttons {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            margin-bottom: 1rem;
+        }
+        .action-btn {
+            padding: 0.6rem 1.2rem;
+            border: 2px solid transparent;
+            border-radius: 6px;
+            font-size: 0.95rem;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s;
+            background: #1a1a2e;
+            color: #e0e0e0;
+        }
+        .action-btn:hover { transform: translateY(-1px); }
+        .action-btn.selected { border-color: #e94560; background: #2a1a3e; }
+        .action-btn.success { border-color: #2ecc71; }
+        .action-btn.success:hover, .action-btn.success.selected { background: #1a3e2e; border-color: #2ecc71; }
+        .action-btn.danger { border-color: #e74c3c; }
+        .action-btn.danger:hover, .action-btn.danger.selected { background: #3e1a1a; border-color: #e74c3c; }
+        .action-btn.warning { border-color: #f39c12; }
+        .action-btn.warning:hover, .action-btn.warning.selected { background: #3e2a1a; border-color: #f39c12; }
+
+        .feedback-input {
+            width: 100%;
+            padding: 0.7rem;
+            border: 1px solid #0f3460;
+            border-radius: 6px;
+            background: #1a1a2e;
+            color: #e0e0e0;
+            font-size: 0.9rem;
+            resize: vertical;
+            min-height: 60px;
+            margin-bottom: 1rem;
+        }
+        .feedback-input:focus { outline: none; border-color: #e94560; }
+
+        .submit-btn {
+            width: 100%;
+            padding: 0.8rem;
+            background: #e94560;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .submit-btn:hover { background: #c73650; }
+        .submit-btn:disabled { background: #555; cursor: not-allowed; }
+
+        /* Navigation */
+        .nav-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .nav-btn {
+            padding: 0.5rem 1.2rem;
+            background: #16213e;
+            border: 1px solid #0f3460;
+            border-radius: 6px;
+            color: #e0e0e0;
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: background 0.2s;
+        }
+        .nav-btn:hover { background: #1f2b4a; }
+        .nav-btn.disabled { opacity: 0.4; pointer-events: none; }
+        .nav-counter { color: #888; font-size: 0.9rem; }
+
+        /* Caption display */
+        .caption-text {
+            font-style: italic;
+            color: #aaa;
+            margin-top: 0.25rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🎬 Kairos Review</h1>
+        <span class="queue-badge">{{ total_pending }} pending</span>
+    </div>
+
+    <div class="container">
+        {% if not has_items %}
+        <div class="empty-state">
+            <h2>No videos pending review</h2>
+            <p>The queue is empty. New videos will appear here when the pipeline produces them.</p>
+        </div>
+        {% else %}
+
+        <!-- Video Player -->
+        <div class="video-section">
+            <video controls autoplay muted>
+                <source src="/video/{{ output_id }}" type="video/mp4">
+                Your browser does not support the video tag.
+            </video>
+        </div>
+
+        <!-- Quick Summary -->
+        <div class="info-grid">
+            <div class="info-card">
+                <h3>Category</h3>
+                <div class="value">{{ output.get('category', 'Unknown') }}</div>
+            </div>
+            <div class="info-card">
+                <h3>Title</h3>
+                <div class="value highlight">{{ output.get('title', 'Untitled') }}</div>
+            </div>
+            <div class="info-card">
+                <h3>Concept</h3>
+                <div class="value">{{ output.get('concept_brief', output.get('visual_brief', 'N/A')) }}</div>
+            </div>
+            <div class="info-card">
+                <h3>Captions</h3>
+                {% if output.get('captions') %}
+                    {% for cap in output.get('captions', {}).get('captions', []) %}
+                    <div class="caption-text">"{{ cap.get('text', '') }}" ({{ cap.get('start_sec', 0) }}s)</div>
+                    {% endfor %}
+                {% else %}
+                <div class="value">No captions</div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Stats Badges -->
+        <div class="stats-row">
+            <div class="stat-badge">
+                <span class="label">Duration:</span>
+                <span class="val">{{ output.get('duration_sec', 'N/A') }}s</span>
+            </div>
+            <div class="stat-badge">
+                <span class="label">Iterations:</span>
+                <span class="val">{{ output.get('simulation_iteration', 'N/A') }}</span>
+            </div>
+            <div class="stat-badge">
+                <span class="label">Cost:</span>
+                <span class="val">${{ "%.2f"|format(output.get('cost_usd', 0) or 0) }}</span>
+            </div>
+            <div class="stat-badge">
+                <span class="label">FPS:</span>
+                <span class="val">{{ output.get('avg_fps', 'N/A') }} avg</span>
+            </div>
+            <div class="stat-badge">
+                <span class="label">Bodies:</span>
+                <span class="val">{{ output.get('peak_body_count', 'N/A') }} peak</span>
+            </div>
+            <div class="stat-badge">
+                <span class="label">Payoff:</span>
+                <span class="val">{{ output.get('payoff_timestamp_sec', 'N/A') }}s</span>
+            </div>
+            {% if output.get('validation_passed') is not none %}
+            <div class="stat-badge {{ 'pass' if output.get('validation_passed') else 'fail' }}">
+                <span class="val">{{ '✅' if output.get('validation_passed') else '❌' }} Validation</span>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Review Actions -->
+        <div class="actions-section">
+            <h3>Review Actions</h3>
+            <form method="POST" action="/review/{{ output_id }}" id="reviewForm">
+                <div class="action-buttons">
+                    {% for act in review_actions %}
+                    <button type="button"
+                            class="action-btn {{ act.style }}"
+                            data-action="{{ act.value }}"
+                            onclick="selectAction(this, '{{ act.value }}')">
+                        {{ act.label }}
+                    </button>
+                    {% endfor %}
+                </div>
+
+                <input type="hidden" name="action" id="selectedAction" value="">
+                <textarea name="feedback" class="feedback-input"
+                          placeholder="Optional feedback (will be used for pipeline re-routing)..."></textarea>
+                <button type="submit" class="submit-btn" id="submitBtn" disabled>
+                    Select an action above
+                </button>
+            </form>
+        </div>
+
+        <!-- Navigation -->
+        <div class="nav-row">
+            <a href="/?index={{ prev_index }}"
+               class="nav-btn {{ 'disabled' if not has_prev }}">← Previous</a>
+            <span class="nav-counter">{{ current_index + 1 }} of {{ total_pending }}</span>
+            <a href="/?index={{ next_index }}"
+               class="nav-btn {{ 'disabled' if not has_next }}">Next →</a>
+        </div>
+
+        {% endif %}
+    </div>
+
+    <script>
+        function selectAction(btn, action) {
+            // Deselect all
+            document.querySelectorAll('.action-btn').forEach(b => b.classList.remove('selected'));
+            // Select this one
+            btn.classList.add('selected');
+            // Set hidden input
+            document.getElementById('selectedAction').value = action;
+            // Enable submit
+            const submitBtn = document.getElementById('submitBtn');
+            submitBtn.disabled = false;
+            submitBtn.textContent = action === 'approved' ? '✅ Submit Approval' : '❌ Submit Rejection';
+        }
+
+        // Prevent double-submit
+        document.getElementById('reviewForm').addEventListener('submit', function(e) {
+            if (!document.getElementById('selectedAction').value) {
+                e.preventDefault();
+                return;
+            }
+            document.getElementById('submitBtn').disabled = true;
+            document.getElementById('submitBtn').textContent = 'Submitting...';
+        });
+    </script>
+</body>
+</html>

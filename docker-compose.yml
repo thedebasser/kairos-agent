@@ -1,0 +1,104 @@
+# =============================================================================
+# Kairos Agent — Docker Compose
+# =============================================================================
+# All services run on localhost. Not exposed to the internet.
+# Usage: docker-compose up -d
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL — Primary database + LangGraph checkpoint store
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: kairos-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: kairos
+      POSTGRES_USER: kairos
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kairos"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Redis — Task queue (Celery broker) + caching
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: kairos-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Ollama — Local LLM serving
+  # ---------------------------------------------------------------------------
+  # NOTE: For the RTX 3090 setup, Ollama should run natively on the host
+  # (not in Docker) to get direct GPU access. This container is provided
+  # for environments where native install isn't possible.
+  # If running Ollama natively, comment out this service and set
+  # OLLAMA_BASE_URL=http://localhost:11434 in .env
+  # ---------------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    container_name: kairos-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # ChromaDB — Vector store for RAG knowledge base
+  # ---------------------------------------------------------------------------
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: kairos-chromadb
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/api/v1/heartbeat || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  postgres_data:
+  redis_data:
+  ollama_data:
+  chroma_data:

@@ -1,0 +1,198 @@
+# =============================================================================
+# Kairos Agent — LLM Configuration
+# =============================================================================
+#
+# Central configuration for ALL LLM usage across the pipeline.
+# Controls model selection, local/cloud routing, and training-data capture.
+#
+# HOW IT WORKS:
+#   Each pipeline step has a "local" and "cloud" model defined.
+#   - If use_local_llms is TRUE:  tries local first, falls back to cloud if
+#     the quality gate fails. Cloud successes are stored as training data
+#     (in Postgres + knowledge/cloud_learnings/) for future local fine-tuning.
+#   - If use_local_llms is FALSE: skips local entirely, goes straight to cloud.
+#     Training data is STILL captured so you can fine-tune local models later.
+#
+# TRAINING DATA STORAGE:
+#   1. Postgres  → agent_runs table (status='escalated') + training_examples table
+#   2. Filesystem → knowledge/cloud_learnings/*.json  (for future RAG / ChromaDB)
+#   Both are written regardless of the use_local_llms toggle.
+#
+# =============================================================================
+
+# ─── Global Toggle ──────────────────────────────────────────────────────────
+#
+# Set to false when running on a machine without local GPU / Ollama.
+# The pipeline will skip all local-model attempts and go straight to cloud,
+# but will still record every cloud response as training data for later use.
+
+use_local_llms: false
+
+# Always store training data from cloud calls, even when local is disabled.
+# (This is the whole point — accumulate data for future fine-tuning.)
+always_store_training_data: true
+
+# ─── Ollama (local model server) ────────────────────────────────────────────
+ollama:
+  base_url: http://localhost:11434          # override with OLLAMA_BASE_URL env var
+
+# ─── Cloud Provider Keys ────────────────────────────────────────────────────
+# API keys are read from environment variables (set in .env), NOT stored here.
+# This section just documents which env vars each provider needs.
+cloud_providers:
+  anthropic:
+    env_var: ANTHROPIC_API_KEY              # Claude models (Sonnet, Haiku, Opus)
+    # Used by: concept-developer, simulation-first-pass, simulation-debugger,
+    #          caption-writer (all cloud steps below)
+
+# ─── Pipeline Steps ─────────────────────────────────────────────────────────
+#
+# Format per step:
+#   agent          — which agent owns this step
+#   description    — human-readable purpose
+#   local_model    — Ollama model tried first (when use_local_llms: true)
+#   cloud_model    — cloud fallback (or direct, when use_local_llms: false)
+#   litellm_alias  — the alias used in litellm_config.yaml / call_llm()
+#   call_pattern   — "direct" (single model) or "quality_fallback" (local→cloud)
+#   quality_gate   — description of how local output is validated before accepting
+#   fallback_note  — what happens if even the cloud call fails
+
+steps:
+
+  # ── Idea Agent ──────────────────────────────────────────────────────────
+
+  category_selector:
+    agent: idea_agent
+    description: >
+      Picks the next video category based on rotation rules
+      (hard block, soft block, boost, streak break).
+    local_model: ollama/mistral:7b-instruct-q4_0
+    cloud_model: claude-sonnet-4-6
+    litellm_alias_local: idea-agent-local
+    litellm_alias_cloud: concept-developer   # reuses the same Claude model
+    call_pattern: direct                      # currently direct; falls back to
+                                              # programmatic category rotation on error
+    quality_gate: "N/A — programmatic fallback on any LLM failure"
+    fallback_note: "Falls back to rule-based category rotation (no LLM needed)"
+
+  concept_developer:
+    agent: idea_agent
+    description: >
+      Generates a full ConceptBrief (title, hook, visual brief, physics params)
+      from the selected category. Creative writing — cloud-only for quality.
+    local_model: null                         # no local model — creative task needs cloud
+    cloud_model: claude-sonnet-4-6
+    litellm_alias_local: null
+    litellm_alias_cloud: concept-developer
+    call_pattern: direct
+    quality_gate: "N/A — cloud only"
+    fallback_note: "Pipeline fails if concept generation fails after retries"
+
+  # ── Simulation Agent ────────────────────────────────────────────────────
+
+  simulation_code_generation:
+    agent: simulation_agent
+    description: >
+      Writes the initial Pygame+Pymunk simulation code from the ConceptBrief.
+      Complex code generation — cloud-only for reliability.
+    local_model: null                         # too complex for local 7B models
+    cloud_model: claude-sonnet-4-6
+    litellm_alias_local: null
+    litellm_alias_cloud: simulation-first-pass
+    call_pattern: direct
+    quality_gate: "N/A — cloud only"
+    fallback_note: "Pipeline fails if code generation fails after retries"
+
+  simulation_param_adjustment:
+    agent: simulation_agent
+    description: >
+      Adjusts simulation parameters after a failed validation pass.
+      Mechanical edits (tweak numbers, fix imports) — local model can handle this.
+      Falls back to cloud if local output fails the quality gate.
+    local_model: ollama/mistral:7b-instruct-q4_0
+    cloud_model: claude-sonnet-4-6
+    litellm_alias_local: sim-param-adjust
+    litellm_alias_cloud: simulation-debugger
+    call_pattern: quality_fallback
+    quality_gate: >
+      Code must contain 'pygame', 'pymunk', 'simulation.mp4' and be >500 chars.
+    fallback_note: >
+      Cloud output is recorded as training data for future local model improvement.
+
+  # ── Video Editor Agent ──────────────────────────────────────────────────
+
+  caption_writer:
+    agent: video_editor_agent
+    description: >
+      Writes a ≤6-word hook caption for the first 0-2 seconds of the video.
+      Highest-leverage text for viewer retention — cloud for quality.
+    local_model: null                         # hook quality is critical — cloud only
+    cloud_model: claude-sonnet-4-6
+    litellm_alias_local: null
+    litellm_alias_cloud: caption-writer
+    call_pattern: direct
+    quality_gate: "N/A — cloud only"
+    fallback_note: "Falls back to concept.hook_text if LLM call fails"
+
+  title_writer:
+    agent: video_editor_agent
+    description: >
+      Generates a YouTube/TikTok title (<80 chars). Simple language task —
+      within local model capability.
+    local_model: ollama/llama3.1:8b
+    cloud_model: claude-sonnet-4-6
+    litellm_alias_local: title-writer
+    litellm_alias_cloud: caption-writer       # reuses caption-writer alias for cloud
+    call_pattern: direct                      # currently direct local; concept fallback on fail
+    quality_gate: "N/A — currently direct call with concept.title fallback"
+    fallback_note: "Falls back to concept.title if LLM call fails"
+
+  # ── Validation (planned, not yet implemented) ───────────────────────────
+
+  frame_inspector:
+    agent: validation_service
+    description: >
+      Tier 2 AI-assisted validation — inspects rendered frames for visual quality.
+      Uses Moondream2 vision model locally. NOT YET IMPLEMENTED (stubbed).
+    local_model: ollama/moondream2
+    cloud_model: null                         # no cloud equivalent planned yet
+    litellm_alias_local: frame-inspector
+    litellm_alias_cloud: null
+    call_pattern: direct
+    quality_gate: "N/A — not yet implemented"
+    fallback_note: "Tier 2 validation is skipped if model unavailable"
+
+
+# =============================================================================
+# Pipeline Flow Summary
+# =============================================================================
+#
+#  ┌──────────────────────────────────────────────────────────────────────────┐
+#  │  IDEA AGENT                                                             │
+#  │  1. Inventory Analyst ─────── pure SQL (no LLM)                         │
+#  │  2. Category Selector ─────── local: Mistral 7B  │ cloud: Claude Sonnet │
+#  │  3. Concept Developer ─────── cloud only: Claude Sonnet                 │
+#  ├──────────────────────────────────────────────────────────────────────────┤
+#  │  SIMULATION AGENT                                                       │
+#  │  4. Code Generation ──────── cloud only: Claude Sonnet                  │
+#  │  5. Param Adjustment ─────── local: Mistral 7B → cloud: Claude Sonnet   │
+#  │     (quality_fallback with learning loop)                               │
+#  ├──────────────────────────────────────────────────────────────────────────┤
+#  │  VIDEO EDITOR AGENT                                                     │
+#  │  6. Caption Writer ───────── cloud only: Claude Sonnet                  │
+#  │  7. Title Writer ─────────── local: Llama 3.1 8B  │ cloud: Claude Sonnet│
+#  │  8. Music Selector ───────── pure programmatic (no LLM)                 │
+#  │  9. FFmpeg Compositor ────── pure programmatic (no LLM)                 │
+#  ├──────────────────────────────────────────────────────────────────────────┤
+#  │  VALIDATION                                                             │
+#  │  10. Tier 1 ──────────────── pure FFprobe (no LLM)                      │
+#  │  11. Tier 2 (planned) ────── local: Moondream2 (not yet implemented)    │
+#  └──────────────────────────────────────────────────────────────────────────┘
+#
+# TRAINING DATA: Every cloud call is logged to Postgres (agent_runs table +
+# training_examples table) AND to knowledge/cloud_learnings/ as JSON files.
+# When you later have a GPU machine, these can be used for:
+#   - Fine-tuning local models (training_examples table)
+#   - RAG retrieval (cloud_learnings/ → ChromaDB)
+#   - Evaluating local vs cloud quality over time (agent_runs analytics)
+#

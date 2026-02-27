@@ -1,0 +1,81 @@
+{
+  "version": "1.0",
+  "description": "Music library metadata for Kairos Agent video assembly.",
+  "tracks": [
+    {
+      "track_id": "upbeat_electronic_01",
+      "filename": "upbeat_electronic_01.mp3",
+      "source": "pixabay",
+      "pixabay_id": 10001,
+      "artist": "SampleArtist",
+      "license": "pixabay_content_license",
+      "duration_sec": 120.0,
+      "bpm": 120,
+      "mood": ["upbeat", "energetic", "happy"],
+      "energy_curve": "building",
+      "genre": "electronic",
+      "contentid_status": "cleared",
+      "use_count": 0
+    },
+    {
+      "track_id": "chill_ambient_01",
+      "filename": "chill_ambient_01.mp3",
+      "source": "pixabay",
+      "pixabay_id": 10002,
+      "artist": "AmbientCreator",
+      "license": "pixabay_content_license",
+      "duration_sec": 90.0,
+      "bpm": 80,
+      "mood": ["calm", "relaxing", "ambient"],
+      "energy_curve": "low",
+      "genre": "ambient",
+      "contentid_status": "cleared",
+      "use_count": 2
+    },
+    {
+      "track_id": "tense_building_01",
+      "filename": "tense_building_01.mp3",
+      "source": "pixabay",
+      "pixabay_id": 10003,
+      "artist": "DramaticBeats",
+      "license": "pixabay_content_license",
+      "duration_sec": 100.0,
+      "bpm": 100,
+      "mood": ["tense", "building", "dramatic"],
+      "energy_curve": "building",
+      "genre": "cinematic",
+      "contentid_status": "cleared",
+      "use_count": 1
+    },
+    {
+      "track_id": "high_energy_drop_01",
+      "filename": "high_energy_drop_01.mp3",
+      "source": "pixabay",
+      "pixabay_id": 10004,
+      "artist": "BassDropper",
+      "license": "pixabay_content_license",
+      "duration_sec": 80.0,
+      "bpm": 140,
+      "mood": ["energetic", "intense", "exciting"],
+      "energy_curve": "climax",
+      "genre": "edm",
+      "contentid_status": "cleared",
+      "use_count": 0
+    },
+    {
+      "track_id": "uncleared_track_01",
+      "filename": "uncleared_track_01.mp3",
+      "source": "pixabay",
+      "pixabay_id": 10005,
+      "artist": "UnknownArtist",
+      "license": "pixabay_content_license",
+      "duration_sec": 95.0,
+      "bpm": 110,
+      "mood": ["upbeat", "energetic"],
+      "energy_curve": "building",
+      "genre": "pop",
+      "contentid_status": "unknown",
+      "use_count": 0
+    }
+  ]
+}
