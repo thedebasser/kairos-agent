@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from kairos.services.response_cache import (
+from kairos.ai.llm.cache import (
     GLOBAL_CACHE_DIR,
     ResponseCache,
     _hash_key,
@@ -27,8 +27,8 @@ def temp_cache(tmp_path: Path):
     global_cache = runs / "_cache"
     global_cache.mkdir(parents=True)
 
-    with patch("kairos.services.response_cache.RUNS_DIR", runs), \
-         patch("kairos.services.response_cache.GLOBAL_CACHE_DIR", global_cache):
+    with patch("kairos.ai.llm.cache.RUNS_DIR", runs), \
+         patch("kairos.ai.llm.cache.GLOBAL_CACHE_DIR", global_cache):
         cache = ResponseCache.__new__(ResponseCache)
         cache.run_id = "test-run"
         cache.step_cache_dir = runs / "test-run" / "cache"

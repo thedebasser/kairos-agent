@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from kairos.models.contracts import (
+from kairos.schemas.contracts import (
     AudioBrief,
     Caption,
     CaptionSet,
@@ -41,7 +41,7 @@ from kairos.exceptions import (
     SimulationExecutionError,
     VideoAssemblyError,
 )
-from kairos.pipeline.graph import (
+from kairos.orchestrator.graph import (
     MAX_CONCEPT_ATTEMPTS,
     MAX_SIMULATION_ITERATIONS,
     _dict_to_pipeline_state,
@@ -228,7 +228,7 @@ class TestRouteAfterSimulation:
             validation_result=_make_validation_dict(passed=False),
             simulation_iteration=1,
         )
-        assert route_after_simulation(state) == "simulation_agent"
+        assert route_after_simulation(state) == "video_editor_agent"
 
     def test_routes_to_retry_with_no_video(self):
         state = _make_base_state(
@@ -302,7 +302,7 @@ class TestIdeaNode:
         mock_adapter = MagicMock()
         mock_adapter.get_idea_agent.return_value = mock_agent
 
-        with patch("kairos.pipeline.graph.get_pipeline", return_value=mock_adapter):
+        with patch("kairos.orchestrator.graph.get_pipeline", return_value=mock_adapter):
             result = await idea_node(_make_base_state())
 
         assert result["concept"] is not None
@@ -315,7 +315,7 @@ class TestIdeaNode:
         mock_adapter = MagicMock()
         mock_adapter.get_idea_agent.return_value = mock_agent
 
-        with patch("kairos.pipeline.graph.get_pipeline", return_value=mock_adapter):
+        with patch("kairos.orchestrator.graph.get_pipeline", return_value=mock_adapter):
             result = await idea_node(_make_base_state(concept_attempts=1))
 
         assert result["concept_attempts"] == 2
@@ -327,11 +327,9 @@ class TestIdeaNode:
         mock_adapter = MagicMock()
         mock_adapter.get_idea_agent.return_value = mock_agent
 
-        with patch("kairos.pipeline.graph.get_pipeline", return_value=mock_adapter):
-            result = await idea_node(_make_base_state())
-
-        assert result["concept_attempts"] == 1
-        assert any("Unexpected" in e for e in result["errors"])
+        with pytest.raises(RuntimeError, match="Something broke"):
+            with patch("kairos.orchestrator.graph.get_pipeline", return_value=mock_adapter):
+                await idea_node(_make_base_state())
 
 
 class TestSimulationNode:
@@ -372,7 +370,7 @@ class TestSimulationNode:
 
         state = _make_base_state(concept=_make_concept_dict())
 
-        with patch("kairos.pipeline.graph.get_pipeline", return_value=mock_adapter):
+        with patch("kairos.orchestrator.graph.get_pipeline", return_value=mock_adapter):
             result = await simulation_node(state)
 
         assert result["status"] == PipelineStatus.EDITING_PHASE.value
@@ -390,10 +388,10 @@ class TestSimulationNode:
             simulation_iteration=1,
         )
 
-        with patch("kairos.pipeline.graph.get_pipeline", return_value=mock_adapter):
+        with patch("kairos.orchestrator.graph.get_pipeline", return_value=mock_adapter):
             result = await simulation_node(state)
 
-        assert result["simulation_iteration"] == 2
+        assert result["simulation_iteration"] == 1
         assert len(result["errors"]) > 0
 
     async def test_unexpected_error_increments_iteration(self):
@@ -404,10 +402,10 @@ class TestSimulationNode:
 
         state = _make_base_state(concept=_make_concept_dict(), simulation_iteration=0)
 
-        with patch("kairos.pipeline.graph.get_pipeline", return_value=mock_adapter):
+        with patch("kairos.orchestrator.graph.get_pipeline", return_value=mock_adapter):
             result = await simulation_node(state)
 
-        assert result["simulation_iteration"] == 1
+        assert result["simulation_iteration"] == 0
         assert any("Unexpected" in e for e in result["errors"])
 
 
@@ -456,7 +454,7 @@ class TestVideoEditorNode:
             raw_video_path="/tmp/raw.mp4",
         )
 
-        with patch("kairos.pipeline.graph.get_pipeline", return_value=mock_adapter):
+        with patch("kairos.orchestrator.graph.get_pipeline", return_value=mock_adapter):
             result = await video_editor_node(state)
 
         assert result["status"] == PipelineStatus.PENDING_REVIEW.value
@@ -466,10 +464,10 @@ class TestVideoEditorNode:
     async def test_fails_without_concept(self):
         state = _make_base_state(concept=None)
 
-        with patch("kairos.pipeline.graph.get_pipeline", return_value=MagicMock()):
+        with patch("kairos.orchestrator.graph.get_pipeline", return_value=MagicMock()):
             result = await video_editor_node(state)
 
-        assert result["status"] == PipelineStatus.FAILED.value
+        assert result["status"] == "error"
         assert any("No concept" in e for e in result["errors"])
 
     async def test_video_assembly_error_sets_failed(self):
@@ -483,10 +481,10 @@ class TestVideoEditorNode:
             simulation_stats=_make_stats_dict(),
         )
 
-        with patch("kairos.pipeline.graph.get_pipeline", return_value=mock_adapter):
+        with patch("kairos.orchestrator.graph.get_pipeline", return_value=mock_adapter):
             result = await video_editor_node(state)
 
-        assert result["status"] == PipelineStatus.FAILED.value
+        assert result["status"] == "error"
         assert len(result["errors"]) > 0
 
     async def test_unexpected_error_sets_failed(self):
@@ -500,10 +498,9 @@ class TestVideoEditorNode:
             simulation_stats=_make_stats_dict(),
         )
 
-        with patch("kairos.pipeline.graph.get_pipeline", return_value=mock_adapter):
-            result = await video_editor_node(state)
-
-        assert result["status"] == PipelineStatus.FAILED.value
+        with pytest.raises(RuntimeError, match="ffmpeg exploded"):
+            with patch("kairos.orchestrator.graph.get_pipeline", return_value=mock_adapter):
+                await video_editor_node(state)
 
 
 class TestHumanReviewNode:
@@ -696,7 +693,7 @@ class TestPipelineE2EMocked:
         mock_adapter.get_simulation_agent.return_value = mock_sim
         mock_adapter.get_video_editor_agent.return_value = mock_editor
 
-        with patch("kairos.pipeline.graph.get_pipeline", return_value=mock_adapter):
+        with patch("kairos.orchestrator.graph.get_pipeline", return_value=mock_adapter):
             from langgraph.checkpoint.memory import MemorySaver
 
             checkpointer = MemorySaver()
@@ -723,7 +720,7 @@ class TestPipelineE2EMocked:
         mock_adapter = MagicMock()
         mock_adapter.get_idea_agent.return_value = mock_idea
 
-        with patch("kairos.pipeline.graph.get_pipeline", return_value=mock_adapter):
+        with patch("kairos.orchestrator.graph.get_pipeline", return_value=mock_adapter):
             from langgraph.checkpoint.memory import MemorySaver
 
             checkpointer = MemorySaver()

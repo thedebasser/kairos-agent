@@ -1,6 +1,6 @@
 """Unit tests for the Physics Video Editor Agent.
 
-Tests all four BaseVideoEditorAgent methods:
+Tests all four VideoEditorAgent methods:
 - select_music() — programmatic music selection
 - generate_captions() — LLM-powered hook caption generation
 - generate_title() — LLM-powered title generation
@@ -21,7 +21,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from kairos.exceptions import VideoAssemblyError
-from kairos.models.contracts import (
+from kairos.schemas.contracts import (
     AudioBrief,
     Caption,
     CaptionSet,
@@ -34,10 +34,10 @@ from kairos.models.contracts import (
     SimulationStats,
     VideoOutput,
 )
-from kairos.models.video_editor import HookCaptionResponse, VideoTitleResponse
+from kairos.schemas.video_editor import HookCaptionResponse, VideoTitleResponse
 from kairos.pipelines.physics.video_editor_agent import (
-    CAPTION_WRITER_MODEL,
-    TITLE_WRITER_MODEL,
+    _caption_writer_model,
+    _title_writer_model,
     PhysicsVideoEditorAgent,
 )
 from kairos.services.caption import (
@@ -50,6 +50,7 @@ from kairos.services.caption import (
     CAPTION_STROKE_WIDTH,
     build_caption_set,
     build_ffmpeg_caption_filter,
+    ffmpeg_escape_path,
     validate_caption_text,
 )
 from kairos.services.ffmpeg_compositor import (
@@ -304,7 +305,7 @@ class TestGenerateCaptions:
 
             # Verify LLM was called with correct model
             mock_call.assert_called_once()
-            assert mock_call.call_args.kwargs["model"] == CAPTION_WRITER_MODEL
+            assert mock_call.call_args.kwargs["model"] == _caption_writer_model()
             assert mock_call.call_args.kwargs["response_model"] is HookCaptionResponse
 
             # Verify caption set
@@ -408,7 +409,7 @@ class TestGenerateTitle:
 
             assert result == "When 500 Balls Meet a Marble Funnel"
             mock_call.assert_called_once()
-            assert mock_call.call_args.kwargs["model"] == TITLE_WRITER_MODEL
+            assert mock_call.call_args.kwargs["model"] == _title_writer_model()
             assert mock_call.call_args.kwargs["response_model"] is VideoTitleResponse
 
     async def test_falls_back_to_concept_title_on_error(
@@ -613,7 +614,9 @@ class TestBuildWatermarkFilter:
 class TestBuildFfmpegCommand:
     """Tests for complete FFmpeg command generation."""
 
-    def test_command_structure(self, sample_caption_set: CaptionSet):
+    @patch("kairos.services.ffmpeg_compositor._probe_has_audio", return_value=False)
+    @patch("kairos.services.ffmpeg_compositor._get_ffmpeg_path", return_value="ffmpeg")
+    def test_command_structure(self, _mock_ffmpeg, _mock_probe, sample_caption_set: CaptionSet):
         cmd = build_ffmpeg_command(
             raw_video_path="/tmp/input.mp4",
             music_path="/tmp/music.mp3",
@@ -624,7 +627,6 @@ class TestBuildFfmpegCommand:
         assert cmd[0] == "ffmpeg"
         assert "-y" in cmd
         assert "/tmp/input.mp4" in cmd
-        assert "/tmp/music.mp3" in cmd
         assert "/tmp/output.mp4" in cmd
 
     def test_codec_settings(self, sample_caption_set: CaptionSet):
@@ -701,7 +703,9 @@ class TestBuildFfmpegCommand:
         filter_str = cmd[idx + 1]
         assert f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}" in filter_str
 
-    def test_audio_filter_in_command(self, sample_caption_set: CaptionSet):
+    @patch("kairos.services.ffmpeg_compositor._probe_has_audio", return_value=False)
+    @patch("kairos.services.ffmpeg_compositor._get_ffmpeg_path", return_value="ffmpeg")
+    def test_audio_filter_in_command(self, _mock_ffmpeg, _mock_probe, sample_caption_set: CaptionSet):
         cmd = build_ffmpeg_command(
             raw_video_path="input.mp4",
             music_path="music.mp3",
@@ -711,8 +715,9 @@ class TestBuildFfmpegCommand:
         )
         idx = cmd.index("-filter_complex")
         filter_str = cmd[idx + 1]
-        assert f"volume={MUSIC_VOLUME_DB}dB" in filter_str
-        assert "afade=t=out" in filter_str
+        # Music removed — silence branch uses anullsrc
+        assert "anullsrc" in filter_str
+        assert "atrim=duration=" in filter_str
 
 
 class TestCaptionFilterIntegration:
@@ -728,7 +733,7 @@ class TestCaptionFilterIntegration:
         result = build_ffmpeg_caption_filter(caption)
 
         assert "drawtext=" in result
-        assert CAPTION_FONT in result
+        assert ffmpeg_escape_path(CAPTION_FONT) in result
         assert f"borderw={CAPTION_STROKE_WIDTH}" in result
         assert "enable='between" in result
         assert "alpha=" in result
@@ -752,7 +757,7 @@ class TestCaptionFilterIntegration:
             end_sec=2.0,
         )
         result = build_ffmpeg_caption_filter(caption)
-        assert "x=(w-text_w)/2" in result
+        assert "x=max(40\\,(w-text_w)/2)" in result
 
     def test_caption_timing_enable(self):
         caption = Caption(
@@ -785,16 +790,16 @@ class TestAdapterIntegration:
     """Tests that the adapter returns PhysicsVideoEditorAgent."""
 
     def test_adapter_returns_video_editor_agent(self):
-        from kairos.pipelines.physics.adapter import PhysicsPipelineAdapter
+        from kairos.pipelines.adapters.physics_adapter import PhysicsPipelineAdapter
 
         adapter = PhysicsPipelineAdapter()
         agent = adapter.get_video_editor_agent()
         assert isinstance(agent, PhysicsVideoEditorAgent)
 
     def test_agent_is_base_video_editor_agent(self):
-        from kairos.agents.base import BaseVideoEditorAgent
-        from kairos.pipelines.physics.adapter import PhysicsPipelineAdapter
+        from kairos.pipelines.contracts import VideoEditorAgent
+        from kairos.pipelines.adapters.physics_adapter import PhysicsPipelineAdapter
 
         adapter = PhysicsPipelineAdapter()
         agent = adapter.get_video_editor_agent()
-        assert isinstance(agent, BaseVideoEditorAgent)
+        assert isinstance(agent, VideoEditorAgent)

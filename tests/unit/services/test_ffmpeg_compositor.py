@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kairos.models.contracts import Caption, CaptionSet, CaptionType
+from kairos.schemas.contracts import Caption, CaptionSet, CaptionType
 
 
 # ---------------------------------------------------------------------------
@@ -73,11 +73,11 @@ def _has_output_maps(cmd: list[str]) -> bool:
 # ---------------------------------------------------------------------------
 
 class TestAudioMixBranch_SFX_TTS:
-    """Branch: video has SFX audio AND TTS is provided → 3-way amix."""
+    """Branch: video has SFX audio AND TTS is provided → 2-way amix (sfx+tts, no music)."""
 
     @patch("kairos.services.ffmpeg_compositor._probe_has_audio", return_value=True)
     @patch("kairos.services.ffmpeg_compositor._get_ffmpeg_path", return_value="ffmpeg")
-    def test_three_way_amix(self, _mock_ffmpeg, _mock_probe, base_kwargs, tmp_path):
+    def test_two_way_amix(self, _mock_ffmpeg, _mock_probe, base_kwargs, tmp_path):
         from kairos.services.ffmpeg_compositor import build_ffmpeg_command
 
         tts_file = tmp_path / "tts.mp3"
@@ -87,10 +87,10 @@ class TestAudioMixBranch_SFX_TTS:
         cmd = build_ffmpeg_command(**base_kwargs)
         fc = _extract_filter_complex(cmd)
 
-        # Must reference three audio inputs and mix them
-        assert "amix=inputs=3" in fc
+        # Must reference two audio inputs (SFX + TTS) and mix them
+        assert "amix=inputs=2" in fc
         assert "[sfx]" in fc
-        assert "[music]" in fc
+        assert "[music]" not in fc
         assert "[tts]" in fc
         assert "[aout]" in fc
         assert _has_output_maps(cmd)
@@ -109,10 +109,8 @@ class TestAudioMixBranch_SFX_TTS:
 
         # SFX comes from stream 0:a
         assert "[0:a]" in fc
-        # Music from stream 1:a
+        # TTS from stream 1:a (music input removed)
         assert "[1:a]" in fc
-        # TTS from stream 2:a
-        assert "[2:a]" in fc
 
     @patch("kairos.services.ffmpeg_compositor._probe_has_audio", return_value=True)
     @patch("kairos.services.ffmpeg_compositor._get_ffmpeg_path", return_value="ffmpeg")
@@ -134,11 +132,11 @@ class TestAudioMixBranch_SFX_TTS:
 # ---------------------------------------------------------------------------
 
 class TestAudioMixBranch_NoSFX_TTS:
-    """Branch: no SFX, TTS provided → 2-way amix (music + TTS)."""
+    """Branch: no SFX, TTS provided → TTS-only stream (no amix)."""
 
     @patch("kairos.services.ffmpeg_compositor._probe_has_audio", return_value=False)
     @patch("kairos.services.ffmpeg_compositor._get_ffmpeg_path", return_value="ffmpeg")
-    def test_two_way_amix_music_tts(self, _mock_ffmpeg, _mock_probe, base_kwargs, tmp_path):
+    def test_tts_only(self, _mock_ffmpeg, _mock_probe, base_kwargs, tmp_path):
         from kairos.services.ffmpeg_compositor import build_ffmpeg_command
 
         tts_file = tmp_path / "tts.mp3"
@@ -148,9 +146,11 @@ class TestAudioMixBranch_NoSFX_TTS:
         cmd = build_ffmpeg_command(**base_kwargs)
         fc = _extract_filter_complex(cmd)
 
-        assert "amix=inputs=2" in fc
-        assert "[music]" in fc
-        assert "[tts]" in fc
+        # Single TTS stream, no amix needed
+        assert "amix" not in fc
+        assert "[music]" not in fc
+        assert "[1:a]" in fc
+        assert "volume=2dB" in fc
         assert "[aout]" in fc
         # No SFX stream should be referenced
         assert "[sfx]" not in fc
@@ -176,19 +176,21 @@ class TestAudioMixBranch_NoSFX_TTS:
 # ---------------------------------------------------------------------------
 
 class TestAudioMixBranch_SFX_NoTTS:
-    """Branch: video has SFX but no TTS → 2-way amix (SFX + music)."""
+    """Branch: video has SFX but no TTS → SFX-only stream (no amix)."""
 
     @patch("kairos.services.ffmpeg_compositor._probe_has_audio", return_value=True)
     @patch("kairos.services.ffmpeg_compositor._get_ffmpeg_path", return_value="ffmpeg")
-    def test_two_way_amix_sfx_music(self, _mock_ffmpeg, _mock_probe, base_kwargs):
+    def test_sfx_only(self, _mock_ffmpeg, _mock_probe, base_kwargs):
         from kairos.services.ffmpeg_compositor import build_ffmpeg_command
 
         cmd = build_ffmpeg_command(**base_kwargs)
         fc = _extract_filter_complex(cmd)
 
-        assert "amix=inputs=2" in fc
-        assert "[sfx]" in fc
-        assert "[music]" in fc
+        # Single SFX stream, no amix needed
+        assert "amix" not in fc
+        assert "[0:a]" in fc
+        assert "volume=6dB" in fc
+        assert "[music]" not in fc
         assert "[aout]" in fc
         # No TTS
         assert "[tts]" not in fc
@@ -210,32 +212,33 @@ class TestAudioMixBranch_SFX_NoTTS:
 # ---------------------------------------------------------------------------
 
 class TestAudioMixBranch_NoSFX_NoTTS:
-    """Branch: no SFX, no TTS → music only (direct filter, no amix)."""
+    """Branch: no SFX, no TTS → anullsrc silence generator."""
 
     @patch("kairos.services.ffmpeg_compositor._probe_has_audio", return_value=False)
     @patch("kairos.services.ffmpeg_compositor._get_ffmpeg_path", return_value="ffmpeg")
-    def test_music_only(self, _mock_ffmpeg, _mock_probe, base_kwargs):
+    def test_silence_generator(self, _mock_ffmpeg, _mock_probe, base_kwargs):
         from kairos.services.ffmpeg_compositor import build_ffmpeg_command
 
         cmd = build_ffmpeg_command(**base_kwargs)
         fc = _extract_filter_complex(cmd)
 
-        # Just music filter, no amix
+        # Silence via anullsrc, no amix
         assert "amix" not in fc
-        assert "[1:a]" in fc
+        assert "anullsrc" in fc
+        assert "atrim=duration=65" in fc
         assert "[aout]" in fc
         assert _has_output_maps(cmd)
 
     @patch("kairos.services.ffmpeg_compositor._probe_has_audio", return_value=False)
     @patch("kairos.services.ffmpeg_compositor._get_ffmpeg_path", return_value="ffmpeg")
-    def test_volume_and_fade(self, _mock_ffmpeg, _mock_probe, base_kwargs):
-        """Music should have volume reduction and fade-out."""
+    def test_no_volume_no_fade(self, _mock_ffmpeg, _mock_probe, base_kwargs):
+        """Silence generator should have no volume or fade processing."""
         from kairos.services.ffmpeg_compositor import build_ffmpeg_command
 
         cmd = build_ffmpeg_command(**base_kwargs)
         fc = _extract_filter_complex(cmd)
-        assert "volume=-18dB" in fc
-        assert "afade=t=out" in fc
+        assert "volume" not in fc
+        assert "afade" not in fc
 
 
 # ---------------------------------------------------------------------------

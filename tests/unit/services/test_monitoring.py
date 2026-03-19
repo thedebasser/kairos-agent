@@ -1,12 +1,12 @@
-"""Tests for kairos.services.monitoring — Metrics, Alerting & Langfuse integration."""
+"""Tests for kairos.ai.tracing.sinks.langfuse_sink — Metrics, Alerting & Langfuse integration."""
 
 from __future__ import annotations
 
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
-from kairos.services.monitoring import (
+from kairos.ai.tracing.sinks.langfuse_sink import (
     Alert,
     AlertManager,
     MetricEntry,
@@ -34,7 +34,7 @@ class TestMetricsStore:
         store = MetricsStore()
         old = MetricEntry(
             name="llm_call",
-            timestamp=datetime.now() - timedelta(hours=2),
+            timestamp=datetime.now(timezone.utc) - timedelta(hours=2),
         )
         new = MetricEntry(name="llm_call")
         store.record(old)
@@ -214,17 +214,19 @@ class TestAlertManager:
 # ── Langfuse Client ──────────────────────────────────────────────────
 
 class TestLangfuseClient:
-    def test_returns_none_without_keys(self):
+    @patch("kairos.ai.tracing.sinks.langfuse_sink.get_settings")
+    def test_returns_none_without_keys(self, mock_settings):
         """Langfuse client returns None when keys are not configured."""
-        import kairos.services.monitoring as m
+        import kairos.ai.tracing.sinks.langfuse_sink as m
 
+        mock_settings.return_value.langfuse_public_key = ""
+        mock_settings.return_value.langfuse_secret_key = ""
         m._langfuse_client = None  # Reset singleton
         client = get_langfuse_client()
-        # Default settings have empty keys
         assert client is None
 
-    @patch("kairos.services.monitoring.get_settings")
-    @patch("kairos.services.monitoring.get_langfuse_client")
+    @patch("kairos.ai.tracing.sinks.langfuse_sink.get_settings")
+    @patch("kairos.ai.tracing.sinks.langfuse_sink.get_langfuse_client")
     def test_trace_llm_call_without_langfuse(self, mock_client, mock_settings):
         """trace_llm_call works fine without Langfuse configured."""
         mock_client.return_value = None
@@ -240,7 +242,7 @@ class TestLangfuseClient:
 
     def test_trace_llm_call_records_local_metric(self):
         """trace_llm_call always records to local metrics store."""
-        import kairos.services.monitoring as m
+        import kairos.ai.tracing.sinks.langfuse_sink as m
 
         store = MetricsStore()
         original_store = m._metrics_store
@@ -264,7 +266,7 @@ class TestLangfuseClient:
 
     def test_trace_pipeline_step_records_metric(self):
         """trace_pipeline_step records to local metrics."""
-        import kairos.services.monitoring as m
+        import kairos.ai.tracing.sinks.langfuse_sink as m
 
         store = MetricsStore()
         original_store = m._metrics_store
@@ -293,7 +295,7 @@ class TestGlobalHelpers:
         assert s1 is s2
 
     def test_record_metric_convenience(self):
-        import kairos.services.monitoring as m
+        import kairos.ai.tracing.sinks.langfuse_sink as m
 
         store = MetricsStore()
         original_store = m._metrics_store

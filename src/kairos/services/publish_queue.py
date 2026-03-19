@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from kairos.models.contracts import PublishStatus
+from kairos.schemas.contracts import PublishStatus
 
 logger = logging.getLogger(__name__)
 

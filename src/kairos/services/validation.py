@@ -17,7 +17,7 @@ import subprocess
 from pathlib import Path
 
 from kairos.config import get_settings
-from kairos.models.contracts import ValidationCheck, ValidationResult
+from kairos.schemas.contracts import ValidationCheck, ValidationResult
 
 logger = logging.getLogger(__name__)
 

@@ -3,6 +3,6 @@
 Pipeline 2 using Blender rigid body physics for procedural marble courses.
 """
 
-from kairos.pipelines.marble.adapter import MarblePipelineAdapter
+from kairos.pipelines.adapters.marble_adapter import MarblePipelineAdapter
 
 __all__ = ["MarblePipelineAdapter"]

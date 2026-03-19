@@ -1,11 +1,11 @@
 """Tests for pipeline adapter interface compliance.
 
-Verifies all registered pipelines implement the BasePipelineAdapter contract.
+Verifies all registered pipelines implement the PipelineAdapter contract.
 """
 
 import pytest
 
-from kairos.pipeline.registry import get_registry
+from kairos.orchestrator.registry import get_registry
 
 pytestmark = pytest.mark.pipeline
 

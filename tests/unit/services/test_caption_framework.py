@@ -5,7 +5,7 @@ Tests caption validation, creation, and FFmpeg filter generation.
 
 import pytest
 
-from kairos.models.contracts import CaptionType
+from kairos.schemas.contracts import CaptionType
 from kairos.services.caption import (
     CAPTION_MAX_WORDS,
     build_caption_set,

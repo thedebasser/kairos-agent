@@ -19,8 +19,8 @@ from typing import Any
 import httpx
 
 from kairos.config import get_settings
-from kairos.models.contracts import PublishStatus
-from kairos.services.monitoring import record_metric, trace_pipeline_step
+from kairos.schemas.contracts import PublishStatus
+from kairos.ai.tracing.sinks.langfuse_sink import record_metric, trace_pipeline_step
 from kairos.services.publish_queue import (
     MAX_RETRY_ATTEMPTS,
     generate_platform_metadata,

@@ -1,6 +1,6 @@
 """Domino Simulation Agent.
 
-Implements BaseSimulationAgent for the Blender domino run pipeline.
+Implements SimulationAgent for the Blender domino run pipeline.
 Orchestrates the full Blender subprocess pipeline:
   generate_domino_course → validate_domino_course → smoke_test_domino → bake_and_render
 
@@ -18,10 +18,10 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from kairos.agents.base import BaseSimulationAgent
+from kairos.pipelines.contracts import SimulationAgent
 from kairos.config import get_settings
 from kairos.exceptions import SimulationExecutionError
-from kairos.models.contracts import (
+from kairos.schemas.contracts import (
     ConceptBrief,
     PipelineStatus,
     SimulationLoopResult,
@@ -30,7 +30,7 @@ from kairos.models.contracts import (
     ValidationCheck,
     ValidationResult,
 )
-from kairos.pipelines.domino.blender_executor import run_blender_script
+from kairos.engines.blender.executor import run_blender_script
 from kairos.pipelines.domino.idea_agent import extract_domino_config
 from kairos.pipelines.domino.models import (
     BakeRenderResult,
@@ -39,7 +39,7 @@ from kairos.pipelines.domino.models import (
     DominoCourseConfig,
     SmokeTestResult,
 )
-from kairos.services.response_cache import get_cache
+from kairos.ai.llm.cache import get_cache
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +60,7 @@ def _get_ffprobe_path() -> str:
     return get_settings().ffprobe_path
 
 
-class DominoSimulationAgent(BaseSimulationAgent):
+class DominoSimulationAgent(SimulationAgent):
     """Simulation agent for the Blender domino run pipeline.
 
     Pipeline:
@@ -172,10 +172,10 @@ class DominoSimulationAgent(BaseSimulationAgent):
                 hook_text=concept.hook_text,
             )
 
-        # Get pipeline_run_id from artifact system (no longer passed via state)
-        from kairos.services.step_artifacts import get_run_artifacts
-        artifacts = get_run_artifacts()
-        run_id = artifacts.run_id if artifacts else "unknown"
+        # Get pipeline_run_id from tracer (no longer passed via state)
+        from kairos.ai.tracing.tracer import get_tracer
+        tracer = get_tracer()
+        run_id = tracer.run_id if tracer._initialised else "unknown"
         work_dir = self._ensure_work_dir(run_id)
 
         config_path = work_dir / "config.json"
@@ -651,7 +651,7 @@ class DominoSimulationAgent(BaseSimulationAgent):
         theme_name = self._derive_theme_from_concept(concept, work_dir)
 
         try:
-            from kairos.services.environment.orchestrator import prepare_environment_without_sfx
+            from kairos.engines.blender.environment.orchestrator import prepare_environment_without_sfx
             env_result = prepare_environment_without_sfx(work_dir, theme_name=theme_name)
             logger.info(
                 "[domino_sim] Environment prepared: theme=%s, hdri=%s, ground=%s",

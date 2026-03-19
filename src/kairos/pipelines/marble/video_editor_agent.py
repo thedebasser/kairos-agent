@@ -1,6 +1,6 @@
 """Marble Video Editor Agent.
 
-Implements BaseVideoEditorAgent for the Blender marble pipeline.
+Implements VideoEditorAgent for the Blender marble pipeline.
 Reuses the same music selection, caption generation, and FFmpeg
 composition logic as the physics pipeline.
 """
@@ -11,25 +11,25 @@ import logging
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from kairos.agents.base import BaseVideoEditorAgent
+from kairos.pipelines.contracts import VideoEditorAgent
 from kairos.config import get_settings
 from kairos.exceptions import VideoAssemblyError
-from kairos.models.contracts import (
+from kairos.schemas.contracts import (
     CaptionSet,
     ConceptBrief,
     MusicTrackMetadata,
     SimulationStats,
     VideoOutput,
 )
-from kairos.models.video_editor import HookCaptionResponse, VideoTitleResponse
+from kairos.schemas.video_editor import HookCaptionResponse, VideoTitleResponse
 from kairos.services.caption import build_caption_set, validate_caption_text
 from kairos.services.ffmpeg_compositor import (
     build_ffmpeg_command,
     check_ffmpeg_available,
     run_ffmpeg,
 )
-from kairos.services.llm_config import get_step_config
-from kairos.services.llm_routing import call_llm
+from kairos.ai.llm.config import get_step_config
+from kairos.ai.llm.routing import call_llm
 from kairos.services.music_selector import load_music_library, select_music
 
 logger = logging.getLogger(__name__)
@@ -49,7 +49,7 @@ def _title_writer_model() -> str:
         return "anthropic/claude-sonnet-4-20250514"
 
 
-class MarbleVideoEditorAgent(BaseVideoEditorAgent):
+class MarbleVideoEditorAgent(VideoEditorAgent):
     """Video Editor Agent for marble course pipeline.
 
     Same workflow as the physics editor:

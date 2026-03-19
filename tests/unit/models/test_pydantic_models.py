@@ -6,7 +6,7 @@ Validates that all data models accept valid input and reject invalid input.
 import pytest
 from pydantic import ValidationError
 
-from kairos.models.contracts import (
+from kairos.schemas.contracts import (
     AudioBrief,
     Caption,
     CaptionSet,
@@ -200,9 +200,8 @@ class TestScenarioCategory:
 
     def test_all_poc_categories_exist(self):
         assert ScenarioCategory.BALL_PIT.value == "ball_pit"
-        assert ScenarioCategory.MARBLE_FUNNEL.value == "marble_funnel"
-        assert ScenarioCategory.DOMINO_CHAIN.value == "domino_chain"
         assert ScenarioCategory.DESTRUCTION.value == "destruction"
 
-    def test_four_categories(self):
-        assert len(ScenarioCategory) == 4
+    def test_category_count(self):
+        # MARBLE_FUNNEL and DOMINO_CHAIN are disabled pending rework
+        assert len(ScenarioCategory) == 2

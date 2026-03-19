@@ -5,6 +5,6 @@ Dominoes placed along curves (spirals, S-curves, branching paths) on a
 ground plane. Physics simulation handles the toppling cascade.
 """
 
-from kairos.pipelines.domino.adapter import DominoPipelineAdapter
+from kairos.pipelines.adapters.domino_adapter import DominoPipelineAdapter
 
 __all__ = ["DominoPipelineAdapter"]

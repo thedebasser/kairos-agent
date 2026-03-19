@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from kairos.models.contracts import (
+from kairos.schemas.contracts import (
     AudioBrief,
     ConceptBrief,
     EnergyLevel,
@@ -25,7 +25,7 @@ from kairos.models.contracts import (
     ScenarioCategory,
     SimulationRequirements,
 )
-from kairos.models.idea import (
+from kairos.schemas.idea import (
     CategoryReport,
     CategorySelection,
     ConceptDeveloperResponse,
@@ -281,16 +281,18 @@ class TestSelectCategoryWithLLM:
     """Tests for LLM-backed category selection."""
 
     @pytest.mark.asyncio
+    @patch("kairos.pipelines.physics.idea_agent.get_step_config")
     @patch("kairos.pipelines.physics.idea_agent.call_llm")
-    async def test_returns_llm_selection(self, mock_call):
+    async def test_returns_llm_selection(self, mock_call, mock_config):
         """Returns the LLM's category selection."""
+        mock_config.return_value.resolve_model.return_value = "test-model"
         mock_call.return_value = CategorySelection(
-            selected_category=ScenarioCategory.MARBLE_FUNNEL,
+            selected_category=ScenarioCategory.DESTRUCTION,
             reasoning="Marble funnel is underrepresented.",
         )
         report = _make_inventory_report()
         result = await select_category_with_llm(report)
-        assert result.selected_category == ScenarioCategory.MARBLE_FUNNEL
+        assert result.selected_category == ScenarioCategory.DESTRUCTION
         assert "underrepresented" in result.reasoning
         mock_call.assert_called_once()
 
@@ -343,13 +345,16 @@ class TestDevelopConcept:
     @pytest.mark.asyncio
     @patch("kairos.pipelines.physics.idea_agent.call_llm")
     async def test_uses_concept_developer_model(self, mock_call):
-        """Calls the 'concept-developer' model (Claude Sonnet)."""
+        """Calls the model resolved from the 'concept_developer' config step."""
+        from kairos.ai.llm.config import get_step_config
+
         mock_call.return_value = _make_concept_response()
         report = _make_inventory_report()
 
         await develop_concept(ScenarioCategory.BALL_PIT, report)
         call_args = mock_call.call_args
-        assert call_args.kwargs["model"] == "concept-developer"
+        expected_model = get_step_config("concept_developer").resolve_model()
+        assert call_args.kwargs["model"] == expected_model
 
 
 # =============================================================================
@@ -367,10 +372,10 @@ class TestGenerateConcept:
         # Mock category selector + concept developer LLM calls
         mock_call.side_effect = [
             CategorySelection(
-                selected_category=ScenarioCategory.MARBLE_FUNNEL,
+                selected_category=ScenarioCategory.DESTRUCTION,
                 reasoning="Good variety",
             ),
-            _make_concept_response(ScenarioCategory.MARBLE_FUNNEL),
+            _make_concept_response(ScenarioCategory.DESTRUCTION),
         ]
 
         agent = PhysicsIdeaAgent(use_llm_selector=True)
@@ -404,7 +409,9 @@ class TestGenerateConcept:
         assert isinstance(concept, ConceptBrief)
         # Only one LLM call (concept developer), not two
         assert mock_call.call_count == 1
-        assert mock_call.call_args.kwargs["model"] == "concept-developer"
+        from kairos.ai.llm.config import get_step_config
+        expected_model = get_step_config("concept_developer").resolve_model()
+        assert mock_call.call_args.kwargs["model"] == expected_model
 
     @pytest.mark.asyncio
     @patch("kairos.pipelines.physics.idea_agent.call_llm")
@@ -631,17 +638,17 @@ class TestAdapterIntegration:
 
     def test_adapter_returns_idea_agent(self):
         """Adapter's get_idea_agent returns a PhysicsIdeaAgent."""
-        from kairos.pipelines.physics.adapter import PhysicsPipelineAdapter
+        from kairos.pipelines.adapters.physics_adapter import PhysicsPipelineAdapter
 
         adapter = PhysicsPipelineAdapter()
         agent = adapter.get_idea_agent()
         assert isinstance(agent, PhysicsIdeaAgent)
 
     def test_agent_is_base_idea_agent(self):
-        """Returned agent is a BaseIdeaAgent subclass."""
-        from kairos.agents.base import BaseIdeaAgent
-        from kairos.pipelines.physics.adapter import PhysicsPipelineAdapter
+        """Returned agent is a IdeaAgent subclass."""
+        from kairos.pipelines.contracts import IdeaAgent
+        from kairos.pipelines.adapters.physics_adapter import PhysicsPipelineAdapter
 
         adapter = PhysicsPipelineAdapter()
         agent = adapter.get_idea_agent()
-        assert isinstance(agent, BaseIdeaAgent)
+        assert isinstance(agent, IdeaAgent)

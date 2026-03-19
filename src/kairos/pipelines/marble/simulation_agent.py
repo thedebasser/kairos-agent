@@ -1,6 +1,6 @@
 """Marble Simulation Agent.
 
-Implements BaseSimulationAgent for the Blender marble course pipeline.
+Implements SimulationAgent for the Blender marble course pipeline.
 Orchestrates the full Blender subprocess pipeline:
   generate_course → validate_course → run_smoke_test → bake_and_render
 
@@ -20,10 +20,10 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from kairos.agents.base import BaseSimulationAgent
+from kairos.pipelines.contracts import SimulationAgent
 from kairos.config import get_settings
 from kairos.exceptions import SimulationExecutionError
-from kairos.models.contracts import (
+from kairos.schemas.contracts import (
     ConceptBrief,
     PipelineStatus,
     SimulationLoopResult,
@@ -32,7 +32,7 @@ from kairos.models.contracts import (
     ValidationCheck,
     ValidationResult,
 )
-from kairos.pipelines.marble.blender_executor import run_blender_script
+from kairos.engines.blender.executor import run_blender_script
 from kairos.pipelines.marble.idea_agent import extract_marble_config
 from kairos.pipelines.marble.models import (
     BakeRenderResult,
@@ -41,7 +41,7 @@ from kairos.pipelines.marble.models import (
     MarbleCourseConfig,
     SmokeTestResult,
 )
-from kairos.services.response_cache import get_cache
+from kairos.ai.llm.cache import get_cache
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ def _get_ffprobe_path() -> str:
     return get_settings().ffprobe_path
 
 
-class MarbleSimulationAgent(BaseSimulationAgent):
+class MarbleSimulationAgent(SimulationAgent):
     """Simulation agent for the Blender marble course pipeline.
 
     Unlike the physics pipeline (which generates Python code and runs

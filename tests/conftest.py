@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from kairos.models.contracts import (
+from kairos.schemas.contracts import (
     AudioBrief,
     Caption,
     CaptionSet,
@@ -86,7 +86,7 @@ def sample_concept_domino() -> ConceptBrief:
     """A domino chain ConceptBrief for category rotation tests."""
     return ConceptBrief(
         pipeline="physics",
-        category=ScenarioCategory.DOMINO_CHAIN,
+        category=ScenarioCategory.BALL_PIT,
         title="Giant domino spiral",
         visual_brief="1000 dominoes arranged in a spiral pattern topple one by one.",
         simulation_requirements=SimulationRequirements(

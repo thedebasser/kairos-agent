@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from kairos.models.contracts import (
+from kairos.schemas.contracts import (
     AudioBrief,
     ConceptBrief,
     DominoArchetype,
@@ -227,13 +227,13 @@ class TestDominoPipelineAdapter:
 
     def test_adapter_registered(self) -> None:
         """Domino pipeline should be registered."""
-        from kairos.pipeline.registry import get_registry
+        from kairos.orchestrator.registry import get_registry
         registry = get_registry()
         assert "domino" in registry
 
     def test_adapter_properties(self) -> None:
         """Adapter should have correct properties."""
-        from kairos.pipeline.registry import get_pipeline
+        from kairos.orchestrator.registry import get_pipeline
         adapter = get_pipeline("domino")
         assert adapter.pipeline_name == "domino"
         assert adapter.engine_name == "blender"
@@ -244,7 +244,7 @@ class TestDominoPipelineAdapter:
 
     def test_adapter_returns_agents(self) -> None:
         """Adapter should return agent instances."""
-        from kairos.pipeline.registry import get_pipeline
+        from kairos.orchestrator.registry import get_pipeline
         adapter = get_pipeline("domino")
 
         idea = adapter.get_idea_agent()
@@ -308,8 +308,10 @@ class TestDominoIdeaAgent:
         idea_input = IdeaAgentInput(pipeline="domino")
 
         with patch("kairos.pipelines.domino.idea_agent.call_llm", new_callable=AsyncMock) as mock_llm, \
-             patch("kairos.services.response_cache.get_cache", return_value=None):
+             patch("kairos.pipelines.domino.idea_agent.call_with_quality_fallback", new_callable=AsyncMock) as mock_qf, \
+             patch("kairos.ai.llm.cache.get_cache", return_value=None):
             mock_llm.return_value = domino_config
+            mock_qf.return_value = domino_config
             concept = await agent.generate_concept(idea_input)
 
         assert concept.pipeline == "domino"
@@ -455,7 +457,7 @@ class TestDominoCaching:
     ) -> None:
         """generate_simulation should skip Blender when cache hits."""
         from kairos.pipelines.domino.simulation_agent import DominoSimulationAgent
-        from kairos.services.response_cache import ResponseCache
+        from kairos.ai.llm.cache import ResponseCache
 
         agent = DominoSimulationAgent()
 
@@ -480,7 +482,7 @@ class TestDominoCaching:
     async def test_validate_uses_cache(self, tmp_path: Path) -> None:
         """validate_output should skip scripts when cache hits."""
         from kairos.pipelines.domino.simulation_agent import DominoSimulationAgent
-        from kairos.services.response_cache import ResponseCache
+        from kairos.ai.llm.cache import ResponseCache
 
         agent = DominoSimulationAgent()
         fake_blend = tmp_path / "domino_course.blend"
@@ -510,7 +512,7 @@ class TestDominoCaching:
     ) -> None:
         """Idea agent should return cached concept without LLM call."""
         from kairos.pipelines.domino.idea_agent import DominoIdeaAgent
-        from kairos.services.response_cache import ResponseCache
+        from kairos.ai.llm.cache import ResponseCache
 
         agent = DominoIdeaAgent(force_archetype="s_curve")
         idea_input = IdeaAgentInput(pipeline="domino")
@@ -520,7 +522,7 @@ class TestDominoCaching:
             "concept": domino_concept.model_dump(mode="json"),
         }
 
-        with patch("kairos.services.response_cache.get_cache",
+        with patch("kairos.ai.llm.cache.get_cache",
                     return_value=mock_cache), \
              patch("kairos.pipelines.domino.idea_agent.call_llm",
                     new_callable=AsyncMock) as mock_llm:

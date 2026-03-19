@@ -1,6 +1,6 @@
 """Physics Idea Agent.
 
-Implements BaseIdeaAgent for the "Oddly Satisfying Physics" pipeline.
+Implements IdeaAgent for the "Oddly Satisfying Physics" pipeline.
 
 Subagents:
 - Inventory Analyst: pure SQL queries against the database
@@ -19,20 +19,20 @@ import random
 from datetime import datetime, timedelta
 from uuid import UUID
 
-from kairos.agents.base import BaseIdeaAgent
+from kairos.pipelines.contracts import IdeaAgent
 from kairos.exceptions import ConceptGenerationError
-from kairos.models.contracts import (
+from kairos.schemas.contracts import (
     ConceptBrief,
     IdeaAgentInput,
     ScenarioCategory,
 )
-from kairos.models.idea import (
+from kairos.schemas.idea import (
     CategoryReport,
     CategorySelection,
     ConceptDeveloperResponse,
     InventoryReport,
 )
-from kairos.pipelines.physics.prompts.builder import (
+from kairos.ai.prompts.physics.builder import (
     build_user_prompt,
     load_system_prompt,
 )
@@ -42,8 +42,8 @@ from kairos.services.category_rotation import (
     compute_streak,
     select_category,
 )
-from kairos.services.llm_config import get_step_config
-from kairos.services.llm_routing import call_llm
+from kairos.ai.llm.config import get_step_config
+from kairos.ai.llm.routing import call_llm
 
 logger = logging.getLogger(__name__)
 
@@ -330,7 +330,7 @@ async def develop_concept(
 # =============================================================================
 
 
-class PhysicsIdeaAgent(BaseIdeaAgent):
+class PhysicsIdeaAgent(IdeaAgent):
     """Idea Agent for the Oddly Satisfying Physics pipeline.
 
     Orchestrates three subagents:

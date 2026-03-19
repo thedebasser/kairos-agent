@@ -5,7 +5,7 @@ Tests programmatic track selection logic.
 
 import pytest
 
-from kairos.models.contracts import (
+from kairos.schemas.contracts import (
     AudioBrief,
     ConceptBrief,
     EnergyLevel,

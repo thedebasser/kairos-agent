@@ -1,6 +1,6 @@
 """Physics Video Editor Agent.
 
-Implements BaseVideoEditorAgent for the physics simulation pipeline.
+Implements VideoEditorAgent for the physics simulation pipeline.
 Assembles final platform-ready video from raw simulation + metadata.
 
 Subagents:
@@ -16,18 +16,18 @@ import logging
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from kairos.agents.base import BaseVideoEditorAgent
+from kairos.pipelines.contracts import VideoEditorAgent
 from kairos.config import get_settings
 from kairos.exceptions import VideoAssemblyError
-from kairos.models.contracts import (
+from kairos.schemas.contracts import (
     CaptionSet,
     ConceptBrief,
     MusicTrackMetadata,
     SimulationStats,
     VideoOutput,
 )
-from kairos.models.video_editor import HookCaptionResponse, VideoTitleResponse
-from kairos.pipelines.physics.prompts.builder import (
+from kairos.schemas.video_editor import HookCaptionResponse, VideoTitleResponse
+from kairos.ai.prompts.physics.builder import (
     build_user_prompt,
     load_system_prompt,
 )
@@ -37,8 +37,8 @@ from kairos.services.ffmpeg_compositor import (
     check_ffmpeg_available,
     run_ffmpeg,
 )
-from kairos.services.llm_config import get_step_config
-from kairos.services.llm_routing import call_llm
+from kairos.ai.llm.config import get_step_config
+from kairos.ai.llm.routing import call_llm
 from kairos.services.music_selector import load_music_library, select_music
 
 logger = logging.getLogger(__name__)
@@ -52,7 +52,7 @@ def _title_writer_model() -> str:
     return get_step_config("title_writer").resolve_model()
 
 
-class PhysicsVideoEditorAgent(BaseVideoEditorAgent):
+class PhysicsVideoEditorAgent(VideoEditorAgent):
     """Video Editor Agent for physics simulation pipeline.
 
     Takes a raw simulation video and produces a platform-ready video
