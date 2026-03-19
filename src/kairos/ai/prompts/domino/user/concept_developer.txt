@@ -1,0 +1,26 @@
+---
+version: 1
+description: "Domino concept developer -- user prompt with archetype and palette variables"
+---
+Generate a domino run concept.
+
+Locked values (do not change):
+  domino_count: 300
+  domino_width: 0.08
+  domino_height: 0.4
+  domino_depth: 0.06
+  spacing_ratio: 0.35
+  path_amplitude: 1.0
+  path_cycles: 2.0
+  domino_mass: 0.3
+  domino_friction: 0.6
+  domino_bounce: 0.1
+  trigger_impulse: 1.5
+  trigger_tilt_degrees: 8.0
+  duration_sec: 65
+
+Archetype for this video: {{ archetype }}
+Palette for this video: {{ palette }}
+
+Output ONLY valid JSON matching this schema:
+{{ schema }}

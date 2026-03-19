@@ -39,7 +39,7 @@ from kairos.schemas.contracts import (
 )
 from kairos.orchestrator.registry import get_pipeline
 from kairos.ai.llm.cache import get_cache, init_cache
-from kairos.services.step_artifacts import get_run_artifacts, init_run_artifacts
+from kairos.ai.tracing.tracer import get_tracer, init_tracer
 from kairos.ai.llm.routing import collect_llm_calls, collect_thinking
 
 logger = logging.getLogger(__name__)
@@ -168,19 +168,11 @@ async def idea_node(state: dict[str, Any]) -> dict[str, Any]:
         concept = await agent.generate_concept(idea_input)
     except PipelineError as exc:
         logger.error("[idea_node] Concept generation failed: %s", exc)
-        # Save failure artifact
-        artifacts = get_run_artifacts()
-        if artifacts:
-            duration_ms = int((time.monotonic() - step_start) * 1000)
-            artifacts.save_step(
-                "idea_agent",
-                step_number=1,
-                status="failed",
-                duration_ms=duration_ms,
-                inputs={"attempt": attempt, "pipeline": pipeline_name},
-                llm_calls=collect_llm_calls(),
-                errors=[str(exc)],
-            )
+        # Emit failure trace
+        tracer = get_tracer()
+        duration_ms = int((time.monotonic() - step_start) * 1000)
+        tracer.console(f"idea_agent failed ({duration_ms}ms): {exc}", level="error", step_name="idea_agent")
+        collect_llm_calls()  # drain buffer
         return {
             "status": "error",
             "concept": None,
@@ -190,24 +182,12 @@ async def idea_node(state: dict[str, Any]) -> dict[str, Any]:
 
     logger.info("[idea_node] OK Concept generated: %s (category=%s)", concept.title, concept.category.value)
 
-    # Save step artifact
-    artifacts = get_run_artifacts()
-    if artifacts:
-        duration_ms = int((time.monotonic() - step_start) * 1000)
-        thinking_entries = collect_thinking()
-        artifacts.save_step(
-            "idea_agent",
-            step_number=1,
-            status="success",
-            duration_ms=duration_ms,
-            inputs={"attempt": attempt, "pipeline": pipeline_name},
-            outputs=concept.model_dump(mode="json"),
-            llm_calls=collect_llm_calls(),
-            metadata={
-                "category": concept.category.value,
-                "llm_thinking": thinking_entries,
-            },
-        )
+    # Emit success trace
+    tracer = get_tracer()
+    duration_ms = int((time.monotonic() - step_start) * 1000)
+    collect_thinking()  # drain thinking buffer
+    collect_llm_calls()  # drain call buffer
+    tracer.console(f"idea_agent completed in {duration_ms}ms", step_name="idea_agent")
 
     result = {
         "status": PipelineStatus.SIMULATION_PHASE.value,
@@ -254,19 +234,11 @@ async def simulation_node(state: dict[str, Any]) -> dict[str, Any]:
         loop_result = await agent.run_loop(concept)  # type: ignore[arg-type]
     except Exception as exc:
         logger.error("[simulation_node] Simulation agent failed: %s", exc)
-        # Save failure artifact
-        artifacts = get_run_artifacts()
-        if artifacts:
-            duration_ms = int((time.monotonic() - step_start) * 1000)
-            artifacts.save_step(
-                "simulation_agent",
-                step_number=2,
-                status="failed",
-                duration_ms=duration_ms,
-                inputs={"concept": state.get("concept")},
-                llm_calls=collect_llm_calls(),
-                errors=[str(exc)],
-            )
+        # Emit failure trace
+        tracer = get_tracer()
+        duration_ms = int((time.monotonic() - step_start) * 1000)
+        tracer.console(f"simulation_agent failed ({duration_ms}ms): {exc}", level="error", step_name="simulation_agent")
+        collect_llm_calls()  # drain buffer
         return {
             "status": PipelineStatus.SIMULATION_PHASE.value,
             "simulation_iteration": pipeline_state.simulation_iteration,
@@ -305,35 +277,16 @@ async def simulation_node(state: dict[str, Any]) -> dict[str, Any]:
         loop_result.raw_video_path,
     )
 
-    # Save success artifact
-    artifacts = get_run_artifacts()
-    if artifacts:
-        duration_ms = int((time.monotonic() - step_start) * 1000)
-        thinking_entries = collect_thinking()
-        artifacts.save_step(
-            "simulation_agent",
-            step_number=2,
-            status="success",
-            duration_ms=duration_ms,
-            inputs={"concept": state.get("concept")},
-            outputs={
-                "iterations": loop_result.simulation_iteration,
-                "raw_video_path": loop_result.raw_video_path,
-                "simulation_stats": (
-                    loop_result.simulation_stats.model_dump(mode="json")
-                    if loop_result.simulation_stats else None
-                ),
-                "validation_result": (
-                    loop_result.validation_result.model_dump(mode="json")
-                    if loop_result.validation_result else None
-                ),
-            },
-            llm_calls=collect_llm_calls(),
-            metadata={"llm_thinking": thinking_entries},
-        )
-        # Also save the raw simulation code as a separate file
-        if loop_result.simulation_code:
-            artifacts.save_file("02_simulation_code.py", loop_result.simulation_code)
+    # Emit success trace
+    tracer = get_tracer()
+    duration_ms = int((time.monotonic() - step_start) * 1000)
+    thinking_entries = collect_thinking()  # drain thinking buffer
+    collect_llm_calls()  # drain call buffer
+    tracer.console(f"simulation_agent completed in {duration_ms}ms", step_name="simulation_agent")
+    # Save the raw simulation code via file writer
+    writer = tracer._writer
+    if writer and loop_result.simulation_code:
+        writer.write_file("steps/02_simulation_agent/simulation_code.py", loop_result.simulation_code)
 
     sim_result = {
         "status": PipelineStatus.EDITING_PHASE.value,
@@ -447,10 +400,9 @@ async def video_editor_node(state: dict[str, Any]) -> dict[str, Any]:
 
     # Point the agent's output dir into the versioned runs/ folder
     # so the final video lands in runs/{run_id}/output/v{n}/
-    artifacts = get_run_artifacts()
-    if artifacts:
-        output_version = state.get("output_version", 0) + 1
-        agent._output_dir = artifacts.get_output_version_dir(output_version)
+    tracer = get_tracer()
+    output_version = state.get("output_version", 0) + 1
+    agent._output_dir = tracer.get_output_dir(output_version)
 
     pipeline_state = _dict_to_pipeline_state(state)
     concept = pipeline_state.concept
@@ -498,19 +450,11 @@ async def video_editor_node(state: dict[str, Any]) -> dict[str, Any]:
         )
     except PipelineError as exc:
         logger.error("[video_editor_node] Video assembly failed: %s", exc)
-        # Save failure artifact
-        artifacts = get_run_artifacts()
-        if artifacts:
-            duration_ms = int((time.monotonic() - step_start) * 1000)
-            artifacts.save_step(
-                "video_editor",
-                step_number=3,
-                status="failed",
-                duration_ms=duration_ms,
-                inputs={"raw_video_path": state.get("raw_video_path", "")},
-                llm_calls=collect_llm_calls(),
-                errors=[str(exc)],
-            )
+        # Emit failure trace
+        tracer = get_tracer()
+        duration_ms = int((time.monotonic() - step_start) * 1000)
+        tracer.console(f"video_editor failed ({duration_ms}ms): {exc}", level="error", step_name="video_editor")
+        collect_llm_calls()  # drain buffer
         return {
             "status": "error",
             "errors": [*state.get("errors", []), f"video_editor_node: {exc}"],
@@ -518,30 +462,12 @@ async def video_editor_node(state: dict[str, Any]) -> dict[str, Any]:
 
     logger.info("[video_editor_node] OK Video assembled: %s", video_output.final_video_path)
 
-    # Save step artifact
-    artifacts = get_run_artifacts()
-    if artifacts:
-        duration_ms = int((time.monotonic() - step_start) * 1000)
-        thinking_entries = collect_thinking()
-        artifacts.save_step(
-            "video_editor",
-            step_number=3,
-            status="success",
-            duration_ms=duration_ms,
-            inputs={
-                "raw_video_path": raw_video_path,
-                "concept_title": concept.title if concept else None,
-            },
-            outputs={
-                "music": music.model_dump(mode="json"),
-                "captions_count": len(captions.captions),
-                "captions": captions.model_dump(mode="json"),
-                "final_video_path": video_output.final_video_path,
-                "output_version": state.get("output_version", 0) + 1,
-            },
-            llm_calls=collect_llm_calls(),
-            metadata={"llm_thinking": thinking_entries},
-        )
+    # Emit success trace
+    tracer = get_tracer()
+    duration_ms = int((time.monotonic() - step_start) * 1000)
+    collect_thinking()  # drain thinking buffer
+    collect_llm_calls()  # drain call buffer
+    tracer.console(f"video_editor completed in {duration_ms}ms", step_name="video_editor")
 
     editor_result = {
         "status": PipelineStatus.PENDING_REVIEW.value,
@@ -642,18 +568,11 @@ async def video_review_node(state: dict[str, Any]) -> dict[str, Any]:
         review_result = await agent.review_video(final_video_path, concept)
     except Exception as exc:
         logger.error("[video_review_node] Video review failed: %s", exc)
-        artifacts = get_run_artifacts()
-        if artifacts:
-            duration_ms = int((time.monotonic() - step_start) * 1000)
-            artifacts.save_step(
-                "video_review",
-                step_number=4,
-                status="failed",
-                duration_ms=duration_ms,
-                inputs={"final_video_path": final_video_path},
-                llm_calls=collect_llm_calls(),
-                errors=[str(exc)],
-            )
+        # Emit failure trace
+        tracer = get_tracer()
+        duration_ms = int((time.monotonic() - step_start) * 1000)
+        tracer.console(f"video_review failed ({duration_ms}ms): {exc}", level="error", step_name="video_review")
+        collect_llm_calls()  # drain buffer
         # On reviewer failure, pass through with warning (don't block pipeline)
         return {
             "video_review_result": None,
@@ -663,23 +582,14 @@ async def video_review_node(state: dict[str, Any]) -> dict[str, Any]:
 
     logger.info("[video_review_node] Result: %s", review_result.summary)
 
-    # Save step artifact
-    artifacts = get_run_artifacts()
-    if artifacts:
-        duration_ms = int((time.monotonic() - step_start) * 1000)
-        artifacts.save_step(
-            "video_review",
-            step_number=4,
-            status="success" if review_result.passed else "failed",
-            duration_ms=duration_ms,
-            inputs={"final_video_path": final_video_path},
-            outputs=review_result.model_dump(mode="json"),
-            llm_calls=collect_llm_calls(),
-            metadata={
-                "model_used": review_result.model_used,
-                "escalated": review_result.escalated,
-            },
-        )
+    # Emit success trace
+    tracer = get_tracer()
+    duration_ms = int((time.monotonic() - step_start) * 1000)
+    collect_llm_calls()  # drain buffer
+    tracer.console(
+        f"video_review completed in {duration_ms}ms (passed={review_result.passed})",
+        step_name="video_review",
+    )
 
     return {
         "video_review_result": review_result.model_dump(mode="json"),
@@ -727,18 +637,11 @@ async def audio_review_node(state: dict[str, Any]) -> dict[str, Any]:
         review_result = await agent.review_audio(final_video_path, expected_transcript)
     except Exception as exc:
         logger.error("[audio_review_node] Audio review failed: %s", exc)
-        artifacts = get_run_artifacts()
-        if artifacts:
-            duration_ms = int((time.monotonic() - step_start) * 1000)
-            artifacts.save_step(
-                "audio_review",
-                step_number=5,
-                status="failed",
-                duration_ms=duration_ms,
-                inputs={"final_video_path": final_video_path},
-                llm_calls=collect_llm_calls(),
-                errors=[str(exc)],
-            )
+        # Emit failure trace
+        tracer = get_tracer()
+        duration_ms = int((time.monotonic() - step_start) * 1000)
+        tracer.console(f"audio_review failed ({duration_ms}ms): {exc}", level="error", step_name="audio_review")
+        collect_llm_calls()  # drain buffer
         # On reviewer failure, pass through with warning
         return {
             "audio_review_result": None,
@@ -748,20 +651,14 @@ async def audio_review_node(state: dict[str, Any]) -> dict[str, Any]:
 
     logger.info("[audio_review_node] Result: %s", review_result.summary)
 
-    # Save step artifact
-    artifacts = get_run_artifacts()
-    if artifacts:
-        duration_ms = int((time.monotonic() - step_start) * 1000)
-        artifacts.save_step(
-            "audio_review",
-            step_number=5,
-            status="success" if review_result.passed else "failed",
-            duration_ms=duration_ms,
-            inputs={"final_video_path": final_video_path},
-            outputs=review_result.model_dump(mode="json"),
-            llm_calls=collect_llm_calls(),
-            metadata={"model_used": review_result.model_used},
-        )
+    # Emit success trace
+    tracer = get_tracer()
+    duration_ms = int((time.monotonic() - step_start) * 1000)
+    collect_llm_calls()  # drain buffer
+    tracer.console(
+        f"audio_review completed in {duration_ms}ms (passed={review_result.passed})",
+        step_name="audio_review",
+    )
 
     return {
         "audio_review_result": review_result.model_dump(mode="json"),
@@ -1066,8 +963,14 @@ async def run_pipeline(
 
     pipeline_run_id = run_id or str(uuid4())
 
-    # Initialise step artifact system for this run
-    run_artifacts = init_run_artifacts(pipeline_run_id, pipeline_name)
+    # Initialise RunTracer with sinks for this run
+    from kairos.ai.tracing.sinks.langfuse_sink import LangfuseSink
+    from kairos.ai.tracing.sinks.db_sink import DatabaseSink
+
+    tracer = init_tracer()
+    tracer.add_sink(LangfuseSink())
+    tracer.add_sink(DatabaseSink())
+    tracer.init_run(pipeline_run_id, pipeline_name)
 
     # Initialise response cache — automatically reuses LLM/sandbox outputs
     run_cache = init_cache(pipeline_run_id)
@@ -1117,8 +1020,17 @@ async def run_pipeline(
             logger.warning("Accumulated error: %s", err)
     logger.info("="  * 60)
 
-    # Save run summary artifact
-    run_artifacts.save_summary(status, final_state)
+    # Finalise run tracing
+    concept_data = final_state.get("concept")
+    concept_title = None
+    if isinstance(concept_data, dict):
+        concept_title = concept_data.get("title")
+    tracer.complete_run(
+        status,
+        errors=final_state.get("errors", []),
+        final_video_path=final_state.get("final_video_path"),
+        concept_title=concept_title,
+    )
 
     # --- P3.29: Post-run cost alert check ---
     try:

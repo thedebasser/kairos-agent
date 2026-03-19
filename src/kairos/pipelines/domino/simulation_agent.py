@@ -172,10 +172,10 @@ class DominoSimulationAgent(SimulationAgent):
                 hook_text=concept.hook_text,
             )
 
-        # Get pipeline_run_id from artifact system (no longer passed via state)
-        from kairos.services.step_artifacts import get_run_artifacts
-        artifacts = get_run_artifacts()
-        run_id = artifacts.run_id if artifacts else "unknown"
+        # Get pipeline_run_id from tracer (no longer passed via state)
+        from kairos.ai.tracing.tracer import get_tracer
+        tracer = get_tracer()
+        run_id = tracer.run_id if tracer._initialised else "unknown"
         work_dir = self._ensure_work_dir(run_id)
 
         config_path = work_dir / "config.json"

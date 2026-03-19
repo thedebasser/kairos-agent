@@ -1,10 +1,11 @@
-"""Kairos Agent — Monitoring & Observability.
+"""Kairos Agent -- Langfuse Tracing Sink & In-Memory Metrics.
 
 Provides:
-- Langfuse integration for LLM call tracing (wraps LiteLLM calls)
-- Cost tracking and alerting
-- Success rate monitoring
-- Pipeline metrics dashboard data
+- ``LangfuseSink`` -- ``TracingSink`` implementation that forwards events
+  to Langfuse for LLM-centric observability.
+- Legacy ``trace_llm_call`` / ``trace_pipeline_step`` functions retained
+  for backward compatibility while the migration to ``RunTracer`` completes.
+- In-memory ``MetricsStore`` + ``AlertManager`` for cost tracking.
 """
 
 from __future__ import annotations
@@ -20,6 +21,62 @@ from uuid import UUID
 from kairos.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# TracingSink Implementation
+# =============================================================================
+
+class LangfuseSink:
+    """TracingSink that forwards events to Langfuse.
+
+    Implements the ``TracingSink`` protocol (on_event / flush / close)
+    so it can be registered with ``RunTracer``.  Also feeds the in-memory
+    ``MetricsStore`` for dashboard queries.
+    """
+
+    def on_event(self, event: Any) -> None:
+        """Dispatch an event to Langfuse and the metrics store."""
+        from kairos.ai.tracing.events import (
+            LLMCallCompleted,
+            StepCompleted,
+        )
+
+        try:
+            if isinstance(event, LLMCallCompleted):
+                trace_llm_call(
+                    trace_name=f"{event.step_name}:{event.model_alias}",
+                    model=event.model_resolved,
+                    input_messages=[],
+                    output=None,
+                    tokens_in=event.tokens_in,
+                    tokens_out=event.tokens_out,
+                    cost_usd=event.cost_usd,
+                    latency_ms=event.latency_ms,
+                    status=event.status,
+                    error=event.error,
+                    pipeline_run_id=event.run_id,
+                )
+            elif isinstance(event, StepCompleted):
+                trace_pipeline_step(
+                    pipeline_run_id=event.run_id,
+                    step_name=event.step_name,
+                    status=event.status,
+                    duration_ms=event.duration_ms,
+                )
+        except Exception as exc:
+            logger.warning("LangfuseSink.on_event failed: %s", exc)
+
+    def flush(self) -> None:
+        client = get_langfuse_client()
+        if client is not None:
+            try:
+                client.flush()
+            except Exception as exc:
+                logger.warning("LangfuseSink.flush failed: %s", exc)
+
+    def close(self) -> None:
+        self.flush()
 
 
 # =============================================================================

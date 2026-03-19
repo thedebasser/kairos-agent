@@ -54,58 +54,8 @@ def _load_rulebook() -> str:
     return ""
 
 
-# ── System prompt for domino concept generation ────────────────────────
-
-_SYSTEM_PROMPT = """\
-You design domino run videos for a short-form video channel.
-
-Every video shows colourful dominoes falling in a satisfying cascade
-on a 3D ground plane, rendered in Blender. Videos last about 65 seconds.
-
-Available archetypes:
-- spiral: dominoes spiral outward from center
-- s_curve: dominoes follow a smooth S-curve path
-- branching: trunk path that fans into multiple branches
-- cascade: wide zigzag rows filling the frame
-- word_spell: dominoes arranged along a shape/arc
-
-Given the archetype, generate:
-- A short, **plain-English** title a viewer would actually search for
-  (e.g. "500 Dominoes Spiral — So Satisfying", "Domino Chain Reaction").
-- A **1-sentence** visual brief describing the look. Be concrete.
-- A punchy hook_text (≤ 6 words) for the opening caption.
-- Choose a colour palette and domino count that fit the archetype.
-- Optionally choose a finale_type: none, tower, ball, or ramp.
-
-Do NOT change physics parameters (mass, friction, spacing) — those are locked.
-
-Output ONLY valid JSON matching the provided schema.
-"""
-
-_USER_PROMPT_TEMPLATE = """\
-Generate a domino run concept.
-
-Locked values (do not change):
-  domino_count: 300
-  domino_width: 0.08
-  domino_height: 0.4
-  domino_depth: 0.06
-  spacing_ratio: 0.35
-  path_amplitude: 1.0
-  path_cycles: 2.0
-  domino_mass: 0.3
-  domino_friction: 0.6
-  domino_bounce: 0.1
-  trigger_impulse: 1.5
-  trigger_tilt_degrees: 8.0
-  duration_sec: 65
-
-Archetype for this video: {archetype}
-Palette for this video: {palette}
-
-Output ONLY valid JSON matching this schema:
-{schema}
-"""
+# Prompt templates are now loaded from ai/prompts/domino/ via builder
+from kairos.ai.prompts.domino.builder import render_concept_system, render_concept_user
 
 
 class DominoIdeaAgent(IdeaAgent):
@@ -205,16 +155,14 @@ class DominoIdeaAgent(IdeaAgent):
 
         rulebook = _load_rulebook()
 
+        system_rp = render_concept_system(rulebook=rulebook)
+        user_rp = render_concept_user(
+            archetype=archetype, palette=palette, schema=schema,
+        )
+
         messages = [
-            {"role": "system", "content": _SYSTEM_PROMPT + rulebook},
-            {
-                "role": "user",
-                "content": _USER_PROMPT_TEMPLATE.format(
-                    archetype=archetype,
-                    palette=palette,
-                    schema=schema,
-                ),
-            },
+            {"role": "system", "content": system_rp.text},
+            {"role": "user", "content": user_rp.text},
         ]
 
         try:

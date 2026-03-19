@@ -77,6 +77,12 @@ def cli() -> None:
         default=None,
         help="Show only a specific step number (e.g. --step 1)",
     )
+    inspect_parser.add_argument(
+        "--speed",
+        type=float,
+        default=0,
+        help="Replay speed (0 = instant, 1 = real-time, 2 = 2x)",
+    )
 
     # pipeline stats
     stats_parser = subparsers.add_parser("stats", help="Show aggregate pipeline statistics")
@@ -115,7 +121,7 @@ def cli() -> None:
 
     # Initialise logging for all commands except 'status'
     if args.command != "status":
-        from kairos.services.session_logging import init_logging
+        from kairos.ai.tracing.logging_config import init_logging
         console_level = logging.DEBUG if getattr(args, "verbose", False) else logging.INFO
         init_logging(console_level=console_level)
 
@@ -128,7 +134,7 @@ def cli() -> None:
     elif args.command == "status":
         asyncio.run(_show_status(args.limit))
     elif args.command == "inspect":
-        _inspect_run(args.run_id, args.step)
+        _inspect_run(args.run_id, args.step, speed=args.speed)
     elif args.command == "stats":
         asyncio.run(_show_stats(args.days, args.as_json))
     elif args.command == "cache":
@@ -254,17 +260,17 @@ async def _show_stats(days: int, as_json: bool = False) -> None:
         print("Ensure PostgreSQL is running and database is initialised.")
 
 
-def _inspect_run(run_id: str | None, step_number: int | None) -> None:
-    """Inspect step artifacts for a pipeline run.
+def _inspect_run(run_id: str | None, step_number: int | None, *, speed: float = 0) -> None:
+    """Inspect a pipeline run using the new tracing layout.
 
     If no run_id given, shows the latest run.
-    If --step N given, shows only that step's artifact in full.
-    Otherwise, shows the run summary.
+    If --step N given, shows only that step's decisions/prompts.
+    Otherwise, replays the run through the Rich display.
     """
     import json
     from pathlib import Path
 
-    runs_dir = Path(__file__).resolve().parent.parent.parent / "runs"
+    runs_dir = Path(__file__).resolve().parent.parent.parent.parent / "runs"
 
     if not runs_dir.exists():
         print("No runs directory found. Run a pipeline first.")
@@ -272,7 +278,11 @@ def _inspect_run(run_id: str | None, step_number: int | None) -> None:
 
     if run_id is None:
         # Find the latest run by modification time
-        run_dirs = sorted(runs_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
+        run_dirs = sorted(
+            (d for d in runs_dir.iterdir() if d.is_dir()),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
         if not run_dirs:
             print("No runs found.")
             sys.exit(1)
@@ -294,25 +304,59 @@ def _inspect_run(run_id: str | None, step_number: int | None) -> None:
                 print(f"Run '{run_id}' not found in {runs_dir}")
                 sys.exit(1)
 
+    # -- Step detail mode --------------------------------------------------
     if step_number is not None:
-        # Show a specific step's artifact
+        steps_dir = run_dir / "steps"
+        if steps_dir.exists():
+            # New layout: steps/NN_step_name/
+            step_dirs = sorted(
+                d for d in steps_dir.iterdir()
+                if d.is_dir() and d.name.startswith(f"{step_number:02d}_")
+            )
+            if step_dirs:
+                step_dir = step_dirs[0]
+                print(f"Step: {step_dir.name}\n")
+                for f in sorted(step_dir.rglob("*")):
+                    if f.is_file():
+                        rel = f.relative_to(step_dir)
+                        if f.suffix in (".json", ".jsonl"):
+                            print(f"--- {rel} ---")
+                            print(f.read_text(encoding="utf-8"))
+                            print()
+                        else:
+                            size = f.stat().st_size
+                            print(f"  {rel} ({size} bytes)")
+                return
+
+        # Fallback: old flat layout (NN_*.json in run_dir)
         step_files = sorted(run_dir.glob(f"{step_number:02d}_*.json"))
-        if not step_files:
-            print(f"No artifact found for step {step_number} in {run_dir.name}")
-            print(f"Available files: {', '.join(f.name for f in sorted(run_dir.iterdir()))}")
-            sys.exit(1)
-        for sf in step_files:
-            data = json.loads(sf.read_text(encoding="utf-8"))
-            print(json.dumps(data, indent=2))
+        if step_files:
+            for sf in step_files:
+                data = json.loads(sf.read_text(encoding="utf-8"))
+                print(json.dumps(data, indent=2))
+            return
+
+        print(f"No artifact found for step {step_number} in {run_dir.name}")
+        sys.exit(1)
+
+    # -- Run overview / replay mode ----------------------------------------
+
+    # If events.jsonl exists, use Rich replay
+    events_file = run_dir / "events.jsonl"
+    if events_file.exists():
+        from kairos.cli.ui.run_display import RunDisplay
+
+        display = RunDisplay()
+        display.replay(run_dir, speed=speed)  # 0 = instant replay
         return
 
-    # Show run summary + list of steps
+    # Fallback: show run_summary.json (old or new layout)
     summary_file = run_dir / "run_summary.json"
     if summary_file.exists():
         summary = json.loads(summary_file.read_text(encoding="utf-8"))
         print(f"Run:      {summary.get('pipeline_run_id', 'N/A')}")
         print(f"Pipeline: {summary.get('pipeline', 'N/A')}")
-        print(f"Status:   {summary.get('final_status', 'N/A')}")
+        print(f"Status:   {summary.get('final_status', summary.get('status', 'N/A'))}")
         print(f"Duration: {summary.get('total_duration_ms', 0)}ms")
         print(f"Concept:  {summary.get('concept_title', 'N/A')}")
         print(f"Video:    {summary.get('final_video_path', 'N/A')}")
@@ -321,20 +365,22 @@ def _inspect_run(run_id: str | None, step_number: int | None) -> None:
         if summary.get("steps"):
             print("Steps:")
             for step in summary["steps"]:
-                icon = "✓" if step["status"] == "success" else "✗"
-                print(f"  {icon} [{step['step_number']}] {step['step']:<25} {step['duration_ms']:>8}ms  ({step['status']})")
+                mark = "+" if step.get("status") == "success" else "x"
+                print(f"  {mark} [{step.get('step_number', '?')}] {step.get('step', '?'):<25} {step.get('duration_ms', 0):>8}ms  ({step.get('status', '?')})")
         if summary.get("errors"):
             print("\nErrors:")
             for err in summary["errors"]:
-                print(f"  → {err}")
+                print(f"  - {err}")
     else:
-        print(f"No run summary found. Available artifacts:")
+        print(f"No run summary found.")
 
     # List all files
     print(f"\nArtifact files in {run_dir.name}/:")
-    for f in sorted(run_dir.iterdir()):
-        size = f.stat().st_size
-        print(f"  {f.name:<40} {size:>8} bytes")
+    for f in sorted(run_dir.rglob("*")):
+        if f.is_file():
+            rel = f.relative_to(run_dir)
+            size = f.stat().st_size
+            print(f"  {str(rel):<50} {size:>8} bytes")
     print(f"\nTo view a step: pipeline inspect {run_dir.name} --step <N>")
 
 
