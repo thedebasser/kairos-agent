@@ -7,7 +7,7 @@ Decouples video production from platform distribution.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from kairos.models.contracts import PublishStatus
 
@@ -63,9 +63,9 @@ def get_next_publish_time(
     config = accounts[account]
     scheduled_times: list[str] = config.get("times", [])  # type: ignore[assignment]
     if not scheduled_times:
-        return after or datetime.now()
+        return after or datetime.now(timezone.utc)
 
-    reference = after or datetime.now()
+    reference = after or datetime.now(timezone.utc)
 
     # Find the next available time slot from the schedule
     for time_str in sorted(scheduled_times):

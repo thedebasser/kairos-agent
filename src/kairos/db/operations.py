@@ -6,7 +6,7 @@ AsyncSession and returns typed results.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from sqlalchemy import select, update
@@ -266,7 +266,7 @@ async def update_output_review(
             status=status,
             review_action=review_action,
             review_feedback=review_feedback,
-            reviewed_at=datetime.now(),
+            reviewed_at=datetime.now(timezone.utc),
         )
     )
     await session.execute(stmt)
@@ -366,6 +366,7 @@ async def log_agent_run(
     input_summary: dict | None = None,  # type: ignore[type-arg]
     output_summary: dict | None = None,  # type: ignore[type-arg]
     idea_id: UUID | None = None,
+    thinking_content: str | None = None,
 ) -> AgentRun:
     """Log an agent execution."""
     run = AgentRun(
@@ -382,6 +383,7 @@ async def log_agent_run(
         error_message=error_message,
         input_summary=input_summary,
         output_summary=output_summary,
+        thinking_content=thinking_content,
     )
     session.add(run)
     await session.flush()
@@ -394,7 +396,7 @@ async def get_rolling_cost_average(
     days: int = 7,
 ) -> float:
     """Get rolling average cost per pipeline run over N days."""
-    cutoff = datetime.now() - timedelta(days=days)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     stmt = (
         select(PipelineRun.total_cost_usd)
         .where(PipelineRun.started_at >= cutoff)
@@ -422,15 +424,29 @@ async def create_training_example(
     validation_passed: bool,
     human_approved: bool,
     rejection_reason: str | None = None,
+    category: str | None = None,
+    reasoning: str | None = None,
+    thinking_content: str | None = None,
+    iteration_count: int = 1,
+    verified: bool = False,
 ) -> TrainingExample:
-    """Create a training example for fine-tuning."""
+    """Create a training example for few-shot learning.
+
+    The ``verified`` flag defaults to **False** — examples are stored
+    but not injected into prompts until an operator flips it to True.
+    """
     example = TrainingExample(
         simulation_id=simulation_id,
         pipeline=pipeline,
+        category=category,
         concept_brief=concept_brief,
         simulation_code=simulation_code,
+        reasoning=reasoning,
+        thinking_content=thinking_content,
         validation_passed=validation_passed,
         human_approved=human_approved,
+        verified=verified,
+        iteration_count=iteration_count,
         rejection_reason=rejection_reason,
     )
     session.add(example)
@@ -452,6 +468,83 @@ async def get_approved_training_examples(
     )
     result = await session.execute(stmt)
     return list(result.scalars().all())
+
+
+async def get_verified_training_examples(
+    session: AsyncSession,
+    pipeline: str,
+    category: str | None = None,
+    limit: int = 5,
+) -> list[TrainingExample]:
+    """Get verified training examples for few-shot prompt injection.
+
+    Only returns examples where ``verified=True``.  This is the gate
+    that prevents unreviewed examples from entering production prompts.
+    """
+    stmt = (
+        select(TrainingExample)
+        .where(TrainingExample.pipeline == pipeline)
+        .where(TrainingExample.verified.is_(True))
+        .where(TrainingExample.validation_passed.is_(True))
+    )
+    if category:
+        stmt = stmt.where(TrainingExample.category == category)
+    # Prefer examples with fewest iterations (first-attempt passes)
+    stmt = stmt.order_by(TrainingExample.iteration_count.asc()).limit(limit)
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def get_category_knowledge(
+    session: AsyncSession,
+    pipeline: str,
+    category: str,
+) -> dict | None:  # type: ignore[type-arg]
+    """Load accumulated knowledge JSONB for a category."""
+    from sqlalchemy import and_
+
+    stmt = select(CategoryStat).where(
+        and_(
+            CategoryStat.pipeline == pipeline,
+            CategoryStat.category == category,
+        )
+    )
+    result = await session.execute(stmt)
+    stat = result.scalar_one_or_none()
+    if stat is None:
+        return None
+    return stat.knowledge  # type: ignore[return-value]
+
+
+async def upsert_category_knowledge(
+    session: AsyncSession,
+    *,
+    pipeline: str,
+    category: str,
+    knowledge: dict,  # type: ignore[type-arg]
+) -> CategoryStat:
+    """Create or update category knowledge JSONB."""
+    from sqlalchemy import and_
+
+    stmt = select(CategoryStat).where(
+        and_(
+            CategoryStat.pipeline == pipeline,
+            CategoryStat.category == category,
+        )
+    )
+    result = await session.execute(stmt)
+    stat = result.scalar_one_or_none()
+    if stat is None:
+        stat = CategoryStat(
+            pipeline=pipeline,
+            category=category,
+            knowledge=knowledge,
+        )
+        session.add(stat)
+    else:
+        stat.knowledge = knowledge  # type: ignore[assignment]
+    await session.flush()
+    return stat
 
 
 # =============================================================================
@@ -517,7 +610,7 @@ async def create_publish_log(
         platform=platform,
         account=account,
         platform_video_id=platform_video_id,
-        published_at=published_at or datetime.now(),
+        published_at=published_at or datetime.now(timezone.utc),
     )
     session.add(log)
     await session.flush()

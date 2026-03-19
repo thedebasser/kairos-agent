@@ -1,0 +1,15 @@
+﻿---
+version: 1
+description: "Title writer user prompt"
+---
+Write a title for this physics simulation video:
+
+Category: {{ category }}
+Title: {{ title }}
+Visual: {{ visual_brief }}
+Hook: {{ hook_text }}
+
+Requirements:
+- Under 80 characters
+- Engaging and descriptive
+- Suitable for "oddly satisfying" content niche

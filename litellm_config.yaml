@@ -13,6 +13,11 @@ model_list:
       model: claude-sonnet-4-6
       api_key: os.environ/ANTHROPIC_API_KEY
 
+  - model_name: concept-developer-local
+    litellm_params:
+      model: ollama/qwen3.5:9b
+      api_base: http://localhost:11434
+
   - model_name: simulation-first-pass
     litellm_params:
       model: claude-sonnet-4-6
@@ -47,7 +52,53 @@ model_list:
 
   - model_name: frame-inspector
     litellm_params:
-      model: ollama/moondream2
+      model: ollama/moondream:latest
+      api_base: http://localhost:11434
+
+  # ─── Video Review models (Ollama) ─────────────────────────────────────────
+
+  - model_name: video-reviewer-default
+    litellm_params:
+      model: ollama/qwen3-vl:8b
+      api_base: http://localhost:11434
+
+  - model_name: video-reviewer-escalation
+    litellm_params:
+      model: ollama/qwen3-vl:30b-a3b
+      api_base: http://localhost:11434
+
+  # ─── Audio Review models (Ollama) ─────────────────────────────────────────
+
+  - model_name: audio-reviewer-default
+    litellm_params:
+      model: ollama/qwen3.5:9b
+      api_base: http://localhost:11434
+
+  - model_name: audio-reviewer-escalation
+    litellm_params:
+      model: ollama/qwen3.5:35b-a3b
+      api_base: http://localhost:11434
+
+  # ─── Blender Coding models (Ollama) ───────────────────────────────────────
+
+  - model_name: blender-coder-default
+    litellm_params:
+      model: ollama/qwen3.5:27b
+      api_base: http://localhost:11434
+
+  - model_name: blender-coder-option2
+    litellm_params:
+      model: ollama/devstral-small:24b
+      api_base: http://localhost:11434
+
+  - model_name: blender-coder-option3
+    litellm_params:
+      model: ollama/qwen3-coder:30b-a3b
+      api_base: http://localhost:11434
+
+  - model_name: blender-coder-fallback
+    litellm_params:
+      model: ollama/qwen2.5-coder:32b
       api_base: http://localhost:11434
 
 router_settings:
@@ -55,5 +106,5 @@ router_settings:
   fallbacks:
     - sim-param-adjust: ["simulation-first-pass"]
   num_retries: 2
-  timeout: 120
+  timeout: 300  # 5 min — simulation code gen needs long responses
   enable_pre_call_checks: true

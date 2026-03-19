@@ -6,6 +6,8 @@ during the simulation generation and adjustment phases.
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -39,6 +41,50 @@ class AdjustedSimulationCode(BaseModel, frozen=True):
     changes_made: list[str] = Field(
         default_factory=list,
         description="List of changes applied to fix the validation failures",
+    )
+    reasoning: str = Field(
+        default="",
+        description="Explanation of why these changes should fix the issues",
+    )
+
+
+# ---------------------------------------------------------------------------
+# JSON-config architecture models (template-based pipeline)
+# ---------------------------------------------------------------------------
+
+
+class SimulationConfigOutput(BaseModel, frozen=True):
+    """Structured output from the LLM config-generation call.
+
+    The LLM returns a JSON configuration matching the category schema.
+    A fixed template consumes this config to produce the simulation.
+    """
+
+    config: dict[str, Any] = Field(
+        description=(
+            "JSON configuration object matching the category-specific schema. "
+            "Controls visual layout, object counts, colours, and creative "
+            "choices. Physics parameters are locked in the template."
+        ),
+    )
+    reasoning: str = Field(
+        default="",
+        description="Brief explanation of creative choices (path type, palette rationale, timing)",
+    )
+
+
+class AdjustedSimulationConfig(BaseModel, frozen=True):
+    """Structured output from the config-adjustment LLM call.
+
+    The LLM fixes config parameters based on validation or physics failures.
+    """
+
+    config: dict[str, Any] = Field(
+        description="The corrected configuration object",
+    )
+    changes_made: list[str] = Field(
+        default_factory=list,
+        description="List of parameter changes applied",
     )
     reasoning: str = Field(
         default="",

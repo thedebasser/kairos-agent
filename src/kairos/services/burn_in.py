@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from kairos.config import get_settings
@@ -119,7 +119,7 @@ class BurnInTracker:
         latency_ms: float = 0.0,
     ) -> None:
         """Record a video production during burn-in."""
-        day = date or datetime.now().strftime("%Y-%m-%d")
+        day = date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
         summary = self._get_or_create_daily(day)
         summary.videos_produced += 1
         summary.total_cost_usd += cost_usd
@@ -141,7 +141,7 @@ class BurnInTracker:
         failure_mode: str | None = None,
     ) -> None:
         """Record a human review decision."""
-        day = date or datetime.now().strftime("%Y-%m-%d")
+        day = date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
         summary = self._get_or_create_daily(day)
 
         if approved:
@@ -185,7 +185,7 @@ class BurnInTracker:
             f"{mode} ({count}x)" for mode, count in mode_counts.most_common(5)
         ]
 
-        report.end_date = datetime.now()
+        report.end_date = datetime.now(timezone.utc)
         return report
 
     def check_targets(self) -> dict[str, bool]:

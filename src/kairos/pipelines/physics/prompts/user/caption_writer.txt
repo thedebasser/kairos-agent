@@ -1,0 +1,19 @@
+﻿---
+version: 1
+description: "Caption writer user prompt"
+---
+Write a hook caption for this physics simulation video:
+
+Category: {{ category }}
+Title: {{ title }}
+Visual: {{ visual_brief }}
+Environment Theme: {{ theme_name }}
+
+The hook caption must:
+- Be 6 words or fewer
+- Create curiosity or intrigue
+- Make viewers want to keep watching
+- Not be clickbait or misleading
+- Match the overall mood/vibe of the "{{ theme_name }}" environment theme
+
+For reference, the concept's original hook was: "{{ hook_text }}"

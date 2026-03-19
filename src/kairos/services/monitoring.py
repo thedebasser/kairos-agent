@@ -13,7 +13,7 @@ import logging
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
@@ -68,10 +68,13 @@ def trace_llm_call(
     error: str | None = None,
     pipeline_run_id: str | None = None,
     metadata: dict[str, Any] | None = None,
+    thinking: str | None = None,
 ) -> None:
     """Log an LLM call to Langfuse for tracing.
 
     If Langfuse is not configured, logs locally only.
+    ``thinking`` is the extended-thinking / chain-of-thought content
+    returned by Anthropic models — logged both locally and in Langfuse.
     """
     client = get_langfuse_client()
 
@@ -94,27 +97,40 @@ def trace_llm_call(
         return
 
     try:
-        generation = client.start_observation(
+        trace_metadata: dict[str, Any] = {
+            "pipeline_run_id": pipeline_run_id,
+            **(metadata or {}),
+        }
+        if thinking:
+            trace_metadata["thinking_chars"] = len(thinking)
+
+        trace = client.trace(
+            name=trace_name,
+            metadata=trace_metadata,
+        )
+        gen_metadata: dict[str, Any] = {
+            "cost_usd": cost_usd,
+            "latency_ms": latency_ms,
+            "status": status,
+            "error": error,
+        }
+        if thinking:
+            # Store thinking content in Langfuse metadata (truncated to 10k
+            # to stay within Langfuse field limits)
+            gen_metadata["thinking"] = thinking[:10_000]
+
+        trace.generation(
             name=f"{trace_name}_generation",
-            as_type="generation",
             model=model,
             input=input_messages,
             output=str(output)[:2000] if output else None,
-            usage_details={
+            usage={
                 "input": tokens_in,
                 "output": tokens_out,
                 "total": tokens_in + tokens_out,
             },
-            metadata={
-                "pipeline_run_id": pipeline_run_id,
-                "cost_usd": cost_usd,
-                "latency_ms": latency_ms,
-                "status": status,
-                "error": error,
-                **(metadata or {}),
-            },
+            metadata=gen_metadata,
         )
-        generation.end()
 
         logger.debug("Langfuse generation logged: %s", trace_name)
 
@@ -144,17 +160,18 @@ def trace_pipeline_step(
         return
 
     try:
-        span = client.start_observation(
+        trace = client.trace(
+            name=f"pipeline:{pipeline_run_id}",
+            metadata={"pipeline_run_id": pipeline_run_id},
+        )
+        trace.span(
             name=step_name,
-            as_type="span",
             metadata={
-                "pipeline_run_id": pipeline_run_id,
                 "status": status,
                 "duration_ms": duration_ms,
                 **(metadata or {}),
             },
         )
-        span.end()
     except Exception as e:
         logger.warning("Failed to log pipeline step to Langfuse: %s", e)
 
@@ -200,12 +217,12 @@ class MetricsStore:
 
     def get_recent(self, *, minutes: int = 60) -> list[MetricEntry]:
         """Get entries from the last N minutes."""
-        cutoff = datetime.now() - timedelta(minutes=minutes)
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
         return [e for e in self._entries if e.timestamp >= cutoff]
 
     def get_videos_today(self) -> int:
         """Count pipeline_step completions for today."""
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         return sum(
             1
             for e in self._entries
@@ -217,7 +234,7 @@ class MetricsStore:
 
     def get_success_rate(self, *, days: int = 7) -> float:
         """Calculate pipeline success rate over the last N days."""
-        cutoff = datetime.now() - timedelta(days=days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         pipeline_steps = [
             e
             for e in self._entries
@@ -231,7 +248,7 @@ class MetricsStore:
 
     def get_rolling_cost_average(self, *, days: int = 7) -> float:
         """Calculate rolling average cost per video over the last N days."""
-        cutoff = datetime.now() - timedelta(days=days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         costs = [
             e.cost_usd
             for e in self._entries
@@ -243,7 +260,7 @@ class MetricsStore:
 
     def get_total_cost(self, *, days: int = 7) -> float:
         """Total cost over the last N days."""
-        cutoff = datetime.now() - timedelta(days=days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         return sum(
             e.cost_usd
             for e in self._entries
@@ -252,7 +269,7 @@ class MetricsStore:
 
     def get_model_latency_stats(self, *, minutes: int = 60) -> dict[str, dict[str, float]]:
         """Get average latency per model over the last N minutes."""
-        cutoff = datetime.now() - timedelta(minutes=minutes)
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
         by_model: defaultdict[str, list[int]] = defaultdict(list)
 
         for e in self._entries:
@@ -314,13 +331,15 @@ class Alert:
     severity: str  # "warning" | "critical"
     value: float
     threshold: float
-    timestamp: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
 
 
 class AlertManager:
     """Checks metrics against thresholds and fires alerts.
 
-    Alerts are accumulated in-memory and sent to Slack when configured.
+    Alerts are accumulated in-memory and sent to Slack / Discord when configured.
     """
 
     def __init__(self, metrics_store: MetricsStore | None = None):
@@ -335,15 +354,49 @@ class AlertManager:
         new_alerts.extend(self._check_success_rate())
         self._alerts.extend(new_alerts)
 
-        # Send alerts to Slack
+        # Send alerts to configured webhooks
         for alert in new_alerts:
             self._send_slack_alert(alert)
+            self._send_discord_alert(alert)
 
         return new_alerts
 
+    def check_run_cost(
+        self,
+        run_id: str,
+        total_cost_usd: float,
+    ) -> Alert | None:
+        """Check if a single pipeline run's cost exceeds the threshold.
+
+        Called after each pipeline run completes. Compares the run's
+        total cost against ``cost_alert_threshold_usd`` from settings.
+
+        Returns:
+            An Alert if threshold exceeded, else None.
+        """
+        threshold = self._settings.cost_alert_threshold_usd
+        if total_cost_usd <= threshold:
+            return None
+
+        alert = Alert(
+            alert_type="run_cost",
+            message=(
+                f"Pipeline run {run_id} cost (${total_cost_usd:.4f}) "
+                f"exceeds threshold (${threshold:.2f})"
+            ),
+            severity="warning",
+            value=total_cost_usd,
+            threshold=threshold,
+        )
+        logger.warning("COST ALERT: %s", alert.message)
+        self._alerts.append(alert)
+        self._send_slack_alert(alert)
+        self._send_discord_alert(alert)
+        return alert
+
     def _send_slack_alert(self, alert: Alert) -> None:
         """Send an alert notification to Slack webhook."""
-        webhook_url = self._settings.slack_webhook_url
+        webhook_url = getattr(self._settings, "slack_webhook_url", "")
         if not webhook_url:
             return
 
@@ -373,6 +426,41 @@ class AlertManager:
                 client.post(webhook_url, json=message, timeout=10)
         except Exception as e:
             logger.warning("Failed to send Slack alert: %s", e)
+
+    def _send_discord_alert(self, alert: Alert) -> None:
+        """Send an alert notification to Discord webhook.
+
+        Uses the Discord webhook format with embeds for rich formatting.
+        Only sends if ``discord_webhook_url`` is configured in settings.
+        """
+        webhook_url = self._settings.discord_webhook_url
+        if not webhook_url:
+            return
+
+        try:
+            import httpx
+
+            color = 0xFF0000 if alert.severity == "critical" else 0xFFA500
+            payload = {
+                "embeds": [
+                    {
+                        "title": f"Pipeline Alert — {alert.severity.upper()}",
+                        "description": alert.message,
+                        "color": color,
+                        "fields": [
+                            {"name": "Type", "value": alert.alert_type, "inline": True},
+                            {"name": "Value", "value": f"{alert.value:.4f}", "inline": True},
+                            {"name": "Threshold", "value": f"{alert.threshold:.4f}", "inline": True},
+                        ],
+                        "timestamp": alert.timestamp.isoformat(),
+                    }
+                ],
+            }
+
+            with httpx.Client() as client:
+                client.post(webhook_url, json=payload, timeout=10)
+        except Exception as e:
+            logger.warning("Failed to send Discord alert: %s", e)
 
     def _check_cost_threshold(self) -> list[Alert]:
         """Alert if 7-day rolling cost average > threshold."""
@@ -416,7 +504,7 @@ class AlertManager:
 
     def get_alerts(self, *, days: int = 7) -> list[Alert]:
         """Get alerts from the last N days."""
-        cutoff = datetime.now() - timedelta(days=days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         return [a for a in self._alerts if a.timestamp >= cutoff]
 
     def clear_alerts(self) -> None:

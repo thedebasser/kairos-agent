@@ -1,0 +1,12 @@
+﻿---
+version: 1
+description: "Shared coordinate system reference"
+---
+## MANDATORY: Coordinate Convention (Y-Down)
+Use pygame-native Y-down coordinates. This eliminates ALL coordinate conversion bugs.
+```python
+pymunk.pygame_util.positive_y_is_up = False  # CRITICAL — set BEFORE any bodies
+space.gravity = (0, {{ gravity_y }})         # Positive Y = down (screen coords)
+# Positions map DIRECTLY to screen pixels — no conversion needed
+# screen_pos = (body.position.x, body.position.y)  ← draw directly
+```

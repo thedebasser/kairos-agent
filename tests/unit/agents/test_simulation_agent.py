@@ -22,6 +22,7 @@ from kairos.models.contracts import (
     ConceptBrief,
     PipelineState,
     PipelineStatus,
+    SimulationLoopResult,
     SimulationResult,
     SimulationStats,
     ValidationCheck,
@@ -122,7 +123,6 @@ class TestGenerateSimulation:
         mock_routing: MagicMock,
         agent: PhysicsSimulationAgent,
         sample_concept: ConceptBrief,
-        pipeline_state: PipelineState,
     ) -> None:
         """Should call the LLM with a category-specific prompt and return code."""
         mock_routing.call_llm = AsyncMock(
@@ -132,7 +132,7 @@ class TestGenerateSimulation:
             )
         )
 
-        code = await agent.generate_simulation(sample_concept, pipeline_state)
+        code = await agent.generate_simulation(sample_concept)
 
         assert "import pygame" in code
         mock_routing.call_llm.assert_awaited_once()
@@ -145,7 +145,6 @@ class TestGenerateSimulation:
         mock_routing: MagicMock,
         agent: PhysicsSimulationAgent,
         sample_concept: ConceptBrief,
-        pipeline_state: PipelineState,
     ) -> None:
         """The prompt should include concept title, body counts, colours, etc."""
         mock_routing.call_llm = AsyncMock(
@@ -185,8 +184,8 @@ class TestExecuteSimulation:
         agent: PhysicsSimulationAgent,
         passing_sim_result: SimulationResult,
     ) -> None:
-        """Should delegate to sandbox.execute_simulation in an executor."""
-        mock_sandbox.execute_simulation = MagicMock(return_value=passing_sim_result)
+        """Should delegate to sandbox.execute_simulation (async)."""
+        mock_sandbox.execute_simulation = AsyncMock(return_value=passing_sim_result)
 
         result = await agent.execute_simulation("import pygame")
 
@@ -201,7 +200,7 @@ class TestExecuteSimulation:
         agent: PhysicsSimulationAgent,
     ) -> None:
         """Should propagate SimulationTimeoutError from sandbox."""
-        mock_sandbox.execute_simulation = MagicMock(
+        mock_sandbox.execute_simulation = AsyncMock(
             side_effect=SimulationTimeoutError("Exceeded 300s timeout")
         )
 
@@ -215,7 +214,7 @@ class TestExecuteSimulation:
         agent: PhysicsSimulationAgent,
     ) -> None:
         """Should propagate SimulationOOMError from sandbox."""
-        mock_sandbox.execute_simulation = MagicMock(
+        mock_sandbox.execute_simulation = AsyncMock(
             side_effect=SimulationOOMError("OOM kill")
         )
 
@@ -409,7 +408,6 @@ class TestRunLoop:
         mock_validation: MagicMock,
         agent: PhysicsSimulationAgent,
         sample_concept: ConceptBrief,
-        pipeline_state: PipelineState,
         passing_sim_result: SimulationResult,
         passing_validation: ValidationResult,
     ) -> None:
@@ -417,7 +415,7 @@ class TestRunLoop:
         mock_routing.call_llm = AsyncMock(
             return_value=SimulationCode(code="import pygame\n# simulation", reasoning="ok")
         )
-        mock_sandbox.execute_simulation = MagicMock(return_value=passing_sim_result)
+        mock_sandbox.execute_simulation = AsyncMock(return_value=passing_sim_result)
         mock_validation.validate_simulation = MagicMock(return_value=passing_validation)
 
         # Mock ffprobe via the agent method
@@ -425,15 +423,14 @@ class TestRunLoop:
             "format": {"duration": "65.0", "size": "45000000"},
             "streams": [{"codec_type": "video", "r_frame_rate": "30/1", "nb_frames": "1950"}],
         }):
-            state = await agent.run_loop(sample_concept, pipeline_state)
+            result = await agent.run_loop(sample_concept)
 
-        assert state.status == PipelineStatus.SIMULATION_PHASE
-        assert state.simulation_iteration == 1
-        assert state.simulation_code == "import pygame\n# simulation"
-        assert state.raw_video_path == "/workspace/output/simulation.mp4"
-        assert state.validation_result is not None
-        assert state.validation_result.passed is True
-        assert state.simulation_stats is not None
+        assert result.simulation_iteration == 1
+        assert result.simulation_code == "import pygame\n# simulation"
+        assert result.raw_video_path == "/workspace/output/simulation.mp4"
+        assert result.validation_result is not None
+        assert result.validation_result.passed is True
+        assert result.simulation_stats is not None
 
     @patch("kairos.pipelines.physics.simulation_agent.validation")
     @patch("kairos.pipelines.physics.simulation_agent.sandbox")
@@ -445,7 +442,6 @@ class TestRunLoop:
         mock_validation: MagicMock,
         agent: PhysicsSimulationAgent,
         sample_concept: ConceptBrief,
-        pipeline_state: PipelineState,
         passing_sim_result: SimulationResult,
         passing_validation: ValidationResult,
         failing_validation: ValidationResult,
@@ -459,7 +455,7 @@ class TestRunLoop:
                 code="fixed code", changes_made=["Fix resolution"]
             )
         )
-        mock_sandbox.execute_simulation = MagicMock(return_value=passing_sim_result)
+        mock_sandbox.execute_simulation = AsyncMock(return_value=passing_sim_result)
         # First validation fails, second passes
         mock_validation.validate_simulation = MagicMock(
             side_effect=[failing_validation, passing_validation]
@@ -469,12 +465,12 @@ class TestRunLoop:
             "format": {"duration": "65.0", "size": "45000000"},
             "streams": [{"codec_type": "video", "r_frame_rate": "30/1", "nb_frames": "1950"}],
         }):
-            state = await agent.run_loop(sample_concept, pipeline_state)
+            result = await agent.run_loop(sample_concept)
 
-        assert state.simulation_iteration == 2
-        assert state.simulation_code == "fixed code"
-        assert state.validation_result is not None
-        assert state.validation_result.passed is True
+        assert result.simulation_iteration == 2
+        assert result.simulation_code == "fixed code"
+        assert result.validation_result is not None
+        assert result.validation_result.passed is True
         assert mock_routing.call_with_quality_fallback.await_count == 1
 
     @patch("kairos.pipelines.physics.simulation_agent.validation")
@@ -487,7 +483,6 @@ class TestRunLoop:
         mock_validation: MagicMock,
         agent: PhysicsSimulationAgent,
         sample_concept: ConceptBrief,
-        pipeline_state: PipelineState,
         passing_sim_result: SimulationResult,
         passing_validation: ValidationResult,
     ) -> None:
@@ -501,7 +496,7 @@ class TestRunLoop:
             )
         )
         # First execution fails, second succeeds
-        mock_sandbox.execute_simulation = MagicMock(
+        mock_sandbox.execute_simulation = AsyncMock(
             side_effect=[
                 SimulationExecutionError("Docker failed"),
                 passing_sim_result,
@@ -513,12 +508,12 @@ class TestRunLoop:
             "format": {"duration": "65.0", "size": "45000000"},
             "streams": [{"codec_type": "video", "r_frame_rate": "30/1", "nb_frames": "1950"}],
         }):
-            state = await agent.run_loop(sample_concept, pipeline_state)
+            result = await agent.run_loop(sample_concept)
 
-        assert len(state.errors) >= 1
-        assert state.simulation_iteration == 2
-        assert state.validation_result is not None
-        assert state.validation_result.passed is True
+        assert len(result.errors) >= 1
+        assert result.simulation_iteration == 2
+        assert result.validation_result is not None
+        assert result.validation_result.passed is True
 
     @patch("kairos.pipelines.physics.simulation_agent.validation")
     @patch("kairos.pipelines.physics.simulation_agent.sandbox")
@@ -530,7 +525,6 @@ class TestRunLoop:
         mock_validation: MagicMock,
         agent: PhysicsSimulationAgent,
         sample_concept: ConceptBrief,
-        pipeline_state: PipelineState,
         passing_sim_result: SimulationResult,
         failing_validation: ValidationResult,
     ) -> None:
@@ -544,19 +538,19 @@ class TestRunLoop:
         mock_routing.call_with_quality_fallback = AsyncMock(
             return_value=AdjustedSimulationCode(code="code v2", changes_made=["fix"])
         )
-        mock_sandbox.execute_simulation = MagicMock(return_value=passing_sim_result)
+        mock_sandbox.execute_simulation = AsyncMock(return_value=passing_sim_result)
         mock_validation.validate_simulation = MagicMock(return_value=failing_validation)
 
         with patch.object(agent, "_ffprobe", return_value={
             "format": {"duration": "65.0", "size": "45000000"},
             "streams": [{"codec_type": "video", "r_frame_rate": "30/1", "nb_frames": "1950"}],
         }):
-            state = await agent.run_loop(sample_concept, pipeline_state)
+            result = await agent.run_loop(sample_concept)
 
-        assert state.simulation_iteration == 2
-        assert state.validation_result is not None
-        assert state.validation_result.passed is False
-        assert any("Max iterations" in e for e in state.errors)
+        assert result.simulation_iteration == 2
+        assert result.validation_result is not None
+        assert result.validation_result.passed is False
+        assert any("Max iterations" in e for e in result.errors)
 
     @patch("kairos.pipelines.physics.simulation_agent.sandbox")
     @patch("kairos.pipelines.physics.simulation_agent.llm_routing")
@@ -566,7 +560,6 @@ class TestRunLoop:
         mock_sandbox: MagicMock,
         agent: PhysicsSimulationAgent,
         sample_concept: ConceptBrief,
-        pipeline_state: PipelineState,
     ) -> None:
         """Should retry when sandbox produces no MP4 file."""
         agent._settings.max_simulation_iterations = 2  # noqa: SLF001
@@ -584,12 +577,12 @@ class TestRunLoop:
             stderr="",
             output_files=["/workspace/output/debug.log"],
         )
-        mock_sandbox.execute_simulation = MagicMock(return_value=no_video_result)
+        mock_sandbox.execute_simulation = AsyncMock(return_value=no_video_result)
 
-        state = await agent.run_loop(sample_concept, pipeline_state)
+        result = await agent.run_loop(sample_concept)
 
-        assert state.simulation_iteration == 2
-        assert any("No MP4" in e for e in state.errors)
+        assert result.simulation_iteration == 2
+        assert any("No MP4" in e for e in result.errors)
 
 
 # ---------------------------------------------------------------------------

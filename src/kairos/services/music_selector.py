@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from kairos.config import get_settings
@@ -150,7 +150,7 @@ def update_track_usage(
         for entry in data.get("tracks", []):
             if entry.get("track_id") == track.track_id:
                 entry["use_count"] = entry.get("use_count", 0) + 1
-                entry["last_used_at"] = datetime.now().isoformat()
+                entry["last_used_at"] = datetime.now(timezone.utc).isoformat()
                 break
 
         with metadata_file.open("w") as f:

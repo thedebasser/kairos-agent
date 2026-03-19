@@ -14,14 +14,18 @@ from abc import ABC, abstractmethod
 from uuid import UUID
 
 from kairos.models.contracts import (
+    AudioReviewResult,
     CaptionSet,
     ConceptBrief,
+    IdeaAgentInput,
     MusicTrackMetadata,
     PipelineState,
+    SimulationLoopResult,
     SimulationResult,
     SimulationStats,
     ValidationResult,
     VideoOutput,
+    VideoReviewResult,
 )
 
 
@@ -36,7 +40,7 @@ class BaseIdeaAgent(ABC):
     """
 
     @abstractmethod
-    async def generate_concept(self, state: PipelineState) -> ConceptBrief:
+    async def generate_concept(self, input: IdeaAgentInput) -> ConceptBrief:
         """Generate a single production-ready concept.
 
         Must respect category rotation rules:
@@ -44,6 +48,9 @@ class BaseIdeaAgent(ABC):
         - Soft block: deprioritise categories >30% of last 30 days
         - Boost: categories with <5 total videos
         - Streak break: force switch after 3 consecutive same-category
+
+        Args:
+            input: Narrow DTO with only the fields needed (e.g. pipeline name).
         """
         ...
 
@@ -64,7 +71,6 @@ class BaseSimulationAgent(ABC):
     async def generate_simulation(
         self,
         concept: ConceptBrief,
-        state: PipelineState,
     ) -> str:
         """Generate initial simulation code from concept brief.
 
@@ -112,12 +118,12 @@ class BaseSimulationAgent(ABC):
     async def run_loop(
         self,
         concept: ConceptBrief,
-        state: PipelineState,
-    ) -> PipelineState:
+    ) -> SimulationLoopResult:
         """Run the full simulation iteration loop.
 
         generate → execute → validate → adjust → repeat
-        Returns updated state with simulation result or escalation flag.
+        Returns a narrow ``SimulationLoopResult`` containing only the
+        fields this step produces (Finding 2.2).
         """
         ...
 
@@ -145,6 +151,8 @@ class BaseVideoEditorAgent(ABC):
     async def generate_captions(
         self,
         concept: ConceptBrief,
+        *,
+        theme_name: str = "",
     ) -> CaptionSet:
         """Generate captions for the video.
 
@@ -177,6 +185,114 @@ class BaseVideoEditorAgent(ABC):
         Output: 9:16, correct codec, 62-68s duration.
         Audio: music at -18dB, fade out last 3s.
         Caption: Inter Bold, white with black stroke, lower third.
+        """
+        ...
+
+
+class BaseVideoReviewAgent(ABC):
+    """Abstract Video Review Agent — inspects rendered clips for quality issues.
+
+    Reviews the final composed video (post-editing) and produces a structured
+    pass/fail finding. Supports escalation to a heavier model for uncertain clips.
+
+    Checks include:
+    - Broken physics simulation (clipping, unrealistic trajectories)
+    - Objects stopping unexpectedly or flying off screen
+    - Bad framing / camera angle
+    - Caption/text overlay placement issues
+    - Overall visual polish
+    """
+
+    @abstractmethod
+    async def review_video(
+        self,
+        video_path: str,
+        concept: ConceptBrief | None = None,
+    ) -> VideoReviewResult:
+        """Review a rendered video clip for quality issues.
+
+        Uses the default VLM model (e.g. Qwen3-VL-8B). If confidence
+        is below the escalation threshold, the implementation should
+        automatically re-review with the escalation model.
+
+        Args:
+            video_path: Path to the final assembled MP4 video.
+            concept: Optional concept brief for context-aware review.
+
+        Returns:
+            Structured review result with pass/fail and issue list.
+        """
+        ...
+
+    @abstractmethod
+    async def run_pre_checks(
+        self,
+        video_path: str,
+    ) -> dict[str, float]:
+        """Run optional lightweight pre-check tools (DOVER, aesthetic scoring).
+
+        Returns a dict of score names to values. Empty dict if pre-checks
+        are disabled. Pre-check failures may short-circuit the VLM review.
+
+        Args:
+            video_path: Path to the video file.
+
+        Returns:
+            Score dict, e.g. {'dover_technical': 0.7, 'aesthetic': 5.2}.
+        """
+        ...
+
+
+class BaseAudioReviewAgent(ABC):
+    """Abstract Audio Review Agent — inspects final composed audio for quality issues.
+
+    Reviews the audio track of the final video (music + TTS + SFX mix).
+    FFmpeg loudness analysis always runs regardless of which model/stack
+    is selected.
+
+    Checks include:
+    - Background static / noise artifacts
+    - Unexpected sounds
+    - TTS accuracy (word error rate)
+    - Theme/vibe match
+    - Volume level consistency
+    - LUFS loudness compliance
+    """
+
+    @abstractmethod
+    async def review_audio(
+        self,
+        audio_path: str,
+        expected_transcript: str = "",
+    ) -> AudioReviewResult:
+        """Review composed audio for quality issues.
+
+        Always runs FFmpeg loudness analysis. Primary review model
+        is configurable (omni-modal LLM, specialist stack, etc.).
+
+        Args:
+            audio_path: Path to the audio file or final video (audio extracted via FFmpeg).
+            expected_transcript: Expected TTS transcript for WER check.
+
+        Returns:
+            Structured review result with pass/fail, issues, and loudness metrics.
+        """
+        ...
+
+    @abstractmethod
+    async def measure_loudness(
+        self,
+        audio_path: str,
+    ) -> dict[str, float]:
+        """Run FFmpeg ebur128 loudness measurement.
+
+        This always runs regardless of which primary reviewer is active.
+
+        Args:
+            audio_path: Path to the audio file.
+
+        Returns:
+            Dict with 'integrated_lufs', 'true_peak_dbtp', 'loudness_range_lu'.
         """
         ...
 
@@ -219,6 +335,16 @@ class BasePipelineAdapter(ABC):
     @abstractmethod
     def get_video_editor_agent(self) -> BaseVideoEditorAgent:
         """Return the Video Editor Agent configured for this pipeline."""
+        ...
+
+    @abstractmethod
+    def get_video_review_agent(self) -> BaseVideoReviewAgent:
+        """Return the Video Review Agent configured for this pipeline."""
+        ...
+
+    @abstractmethod
+    def get_audio_review_agent(self) -> BaseAudioReviewAgent:
+        """Return the Audio Review Agent configured for this pipeline."""
         ...
 
     @abstractmethod

@@ -27,6 +27,10 @@ from kairos.models.contracts import (
     VideoOutput,
 )
 from kairos.models.video_editor import HookCaptionResponse, VideoTitleResponse
+from kairos.pipelines.physics.prompts.builder import (
+    build_user_prompt,
+    load_system_prompt,
+)
 from kairos.services.caption import build_caption_set, validate_caption_text
 from kairos.services.ffmpeg_compositor import (
     build_ffmpeg_command,
@@ -107,7 +111,7 @@ class PhysicsVideoEditorAgent(BaseVideoEditorAgent):
                 pipeline_run_id=self._pipeline_run_id,
             )
 
-        selected = select_music(concept, stats, library)
+        selected = select_music(concept, stats, library=library)
 
         if selected is None:
             raise VideoAssemblyError(
@@ -126,6 +130,8 @@ class PhysicsVideoEditorAgent(BaseVideoEditorAgent):
     async def generate_captions(
         self,
         concept: ConceptBrief,
+        *,
+        theme_name: str = "",
     ) -> CaptionSet:
         """Generate captions for the video.
 
@@ -147,34 +153,20 @@ class PhysicsVideoEditorAgent(BaseVideoEditorAgent):
             response = await call_llm(
                 model=_caption_writer_model(),
                 messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are a short-form video caption writer specialising in "
-                            "'oddly satisfying' physics simulation content. Your job is "
-                            "to write a single hook caption that appears in the first "
-                            "0-2 seconds and creates enough curiosity to stop the scroll. "
-                            "The caption must be 6 words or fewer. Be concise and intriguing."
-                        ),
-                    },
+                    {"role": "system", "content": load_system_prompt("caption_writer").text},
                     {
                         "role": "user",
-                        "content": (
-                            f"Write a hook caption for this physics simulation video:\n\n"
-                            f"Category: {concept.category.value}\n"
-                            f"Title: {concept.title}\n"
-                            f"Visual: {concept.visual_brief}\n\n"
-                            f"The hook caption must:\n"
-                            f"- Be 6 words or fewer\n"
-                            f"- Create curiosity or intrigue\n"
-                            f"- Make viewers want to keep watching\n"
-                            f"- Not be clickbait or misleading\n\n"
-                            f"For reference, the concept's original hook was: "
-                            f'"{concept.hook_text}"'
-                        ),
+                        "content": build_user_prompt("caption_writer", {
+                            "category": concept.category.value,
+                            "title": concept.title,
+                            "visual_brief": concept.visual_brief,
+                            "hook_text": concept.hook_text,
+                            "theme_name": theme_name or "default",
+                        }).text,
                     },
                 ],
                 response_model=HookCaptionResponse,
+                cache_step="caption_writer",
             )
 
             hook_text = response.hook_text
@@ -223,32 +215,19 @@ class PhysicsVideoEditorAgent(BaseVideoEditorAgent):
             response = await call_llm(
                 model=_title_writer_model(),
                 messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are a title writer for short-form physics simulation "
-                            "videos on YouTube Shorts and TikTok. Write engaging, "
-                            "descriptive titles that are under 80 characters. "
-                            "Do NOT use clickbait, misleading claims, or excessive caps. "
-                            "The audience loves 'oddly satisfying' content."
-                        ),
-                    },
+                    {"role": "system", "content": load_system_prompt("title_writer").text},
                     {
                         "role": "user",
-                        "content": (
-                            f"Write a title for this physics simulation video:\n\n"
-                            f"Category: {concept.category.value}\n"
-                            f"Title: {concept.title}\n"
-                            f"Visual: {concept.visual_brief}\n"
-                            f"Hook: {concept.hook_text}\n\n"
-                            f"Requirements:\n"
-                            f"- Under 80 characters\n"
-                            f"- Engaging and descriptive\n"
-                            f'- Suitable for "oddly satisfying" content niche'
-                        ),
+                        "content": build_user_prompt("title_writer", {
+                            "category": concept.category.value,
+                            "title": concept.title,
+                            "visual_brief": concept.visual_brief,
+                            "hook_text": concept.hook_text,
+                        }).text,
                     },
                 ],
                 response_model=VideoTitleResponse,
+                cache_step="title_writer",
             )
 
             title = response.title

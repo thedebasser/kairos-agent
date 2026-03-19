@@ -1,0 +1,30 @@
+{
+  "version": "1.0",
+  "render": {
+    "engine": "CYCLES",
+    "device": "GPU",
+    "samples": 128,
+    "resolution_x": 1080,
+    "resolution_y": 1920,
+    "fps": 30,
+    "output_format": "FFMPEG",
+    "ffmpeg_format": "MPEG4",
+    "ffmpeg_codec": "H264",
+    "ffmpeg_quality": "HIGH",
+    "film_transparent": false,
+    "use_denoising": true
+  },
+  "render_preview": {
+    "engine": "EEVEE",
+    "samples": 32,
+    "resolution_x": 540,
+    "resolution_y": 960,
+    "fps": 30,
+    "output_format": "FFMPEG",
+    "ffmpeg_format": "MPEG4",
+    "ffmpeg_codec": "H264",
+    "ffmpeg_quality": "MEDIUM",
+    "film_transparent": false,
+    "use_denoising": false
+  }
+}

@@ -59,9 +59,20 @@ class PublishError(PipelineError):
     """Upload to platform failed after all retries."""
 
 
-class InfrastructureError(PipelineError):
+class InfrastructureError(Exception):
     """Database, Redis, Docker, or other infrastructure failure. Always fatal.
 
-    This exception is NEVER caught by pipeline error handlers.
-    It crashes the process immediately.
+    Inherits from Exception (NOT PipelineError) so that ``except PipelineError``
+    handlers cannot accidentally swallow infrastructure failures.
+    (Finding 4.2 — kairos_architectural_review)
     """
+
+    def __init__(self, message: str, pipeline_run_id: UUID | None = None) -> None:
+        self.pipeline_run_id = pipeline_run_id
+        super().__init__(message)
+
+    def __str__(self) -> str:
+        base = super().__str__()
+        if self.pipeline_run_id:
+            return f"[run={self.pipeline_run_id}] {base}"
+        return base

@@ -23,7 +23,7 @@ from kairos.agents.base import BaseIdeaAgent
 from kairos.exceptions import ConceptGenerationError
 from kairos.models.contracts import (
     ConceptBrief,
-    PipelineState,
+    IdeaAgentInput,
     ScenarioCategory,
 )
 from kairos.models.idea import (
@@ -31,6 +31,10 @@ from kairos.models.idea import (
     CategorySelection,
     ConceptDeveloperResponse,
     InventoryReport,
+)
+from kairos.pipelines.physics.prompts.builder import (
+    build_user_prompt,
+    load_system_prompt,
 )
 from kairos.services.category_rotation import (
     BOOST_THRESHOLD,
@@ -134,6 +138,8 @@ def select_category_from_report(
         Selected category name.
     """
     # Convert report categories to CategoryInfo for the rotation engine
+    # Filter to only currently-active categories (enum members)
+    valid_cats = {c.value for c in ScenarioCategory}
     category_infos = [
         CategoryInfo(
             name=cat.category,
@@ -143,6 +149,7 @@ def select_category_from_report(
             is_last_used=cat.is_last_used,
         )
         for cat in report.categories
+        if cat.category in valid_cats
     ]
 
     # If no categories in report (empty DB), use all physics categories
@@ -170,37 +177,31 @@ async def select_category_with_llm(
         CategorySelection with selected category and reasoning.
     """
     # Build the prompt for the Category Selector LLM
+    # Filter to only currently-active categories (enum members)
+    valid_cats = {c.value for c in ScenarioCategory}
     categories_text = "\n".join(
         f"- {cat.category}: {cat.total_count} total, "
         f"{cat.videos_last_30_days} last 30 days ({cat.percentage_last_30_days}%), "
         f"streak={cat.streak_count}, last_used={cat.is_last_used}, "
         f"needs_boost={cat.needs_boost}"
         for cat in report.categories
+        if cat.category in valid_cats
     )
 
     messages = [
         {
             "role": "system",
-            "content": (
-                "You are a content strategist for a physics simulation video channel. "
-                "Select the best scenario category for the next video based on rotation "
-                "rules and category statistics.\n\n"
-                "Rules:\n"
-                "1. HARD BLOCK: Never select the same category as the previous video\n"
-                "2. STREAK BREAK: Never select a category used 3+ times consecutively\n"
-                "3. SOFT BLOCK: Deprioritise categories >30% of last 30 days output\n"
-                "4. BOOST: Prefer categories with <5 total videos\n\n"
-                f"Available categories: {', '.join(PHYSICS_CATEGORIES)}"
-            ),
+            "content": load_system_prompt("category_selector", {
+                "available_categories": ", ".join(PHYSICS_CATEGORIES),
+            }).text,
         },
         {
             "role": "user",
-            "content": (
-                f"Category Statistics:\n{categories_text}\n\n"
-                f"Last category used: {report.last_category or 'None (first video)'}\n"
-                f"Recent sequence: {report.recent_categories[:5] or ['None']}\n\n"
-                "Select the best category for the next video."
-            ),
+            "content": build_user_prompt("category_selector", {
+                "categories_text": categories_text,
+                "last_category": report.last_category or "None (first video)",
+                "recent_sequence": str(report.recent_categories[:5] or ["None"]),
+            }).text,
         },
     ]
 
@@ -210,6 +211,7 @@ async def select_category_with_llm(
             model=model,
             messages=messages,
             response_model=CategorySelection,
+            cache_step="category_selector",
         )
     except Exception:
         logger.warning(
@@ -243,24 +245,30 @@ def _build_concept_developer_prompt(
     """
     category_descriptions = {
         ScenarioCategory.BALL_PIT: (
-            "Ball pit / collision cascade: Colourful balls interacting in a confined space. "
-            "Collisions, spawning, chain reactions, gravity effects. "
-            "Key appeal: satisfying physics, cascading effects, screen filling with colour."
+            "Ball pit / collision cascade: Colourful balls filling containers, bouncing, "
+            "piling up. Simple obstacles (2-4 platforms/funnels). "
+            "Key appeal: satisfying bouncing, cascading colour, accumulation → overflow. "
+            "Physics: balls as pymunk.Circle, radius 15-30px, elasticity 0.7.\n"
+            "PSYCHOLOGY: Tier 1 satisfaction (4+ mechanisms). Container overflow triggers "
+            "Zeigarnik completion + catharsis + pattern recognition. The container "
+            "MUST have a climax event (gate burst, wall collapse, overflow) — balls "
+            "bouncing with no end state is the LOWEST satisfaction tier. "
+            "Rainbow-sequence spawn colours encode time → visual narrative."
         ),
-        ScenarioCategory.MARBLE_FUNNEL: (
-            "Marble funnel / sorting: Marbles rolling through funnels, ramps, and sorting "
-            "mechanisms. Gravity-driven flow, splitting, merging, colour sorting. "
-            "Key appeal: mesmerising flow, predictable yet satisfying paths."
-        ),
-        ScenarioCategory.DOMINO_CHAIN: (
-            "Domino chains: Sequences of dominoes toppling in patterns — spirals, mazes, "
-            "splits, reunions. Chain reactions with perfect timing. "
-            "Key appeal: anticipation, perfect execution, satisfying completion."
-        ),
+        # MARBLE_FUNNEL disabled — ramp geometry needs work
+        # ScenarioCategory.MARBLE_FUNNEL: ( ... ),
+        # DOMINO_CHAIN disabled — doesn't work for portrait layout
+        # ScenarioCategory.DOMINO_CHAIN: ( ... ),
         ScenarioCategory.DESTRUCTION: (
-            "Destruction / stacking: Building tall structures then destroying them, "
-            "or stacking objects to impossible heights before collapse. "
-            "Key appeal: tension of will-it-hold, dramatic collapse, debris physics."
+            "Destruction / tower collapse: A stable block tower hit by a wrecking ball. "
+            "Simple tower (10-15 layers × 3-5 blocks). Pre-settled before recording. "
+            "Key appeal: tension → dramatic collapse → debris scatter. "
+            "Physics: blocks 60-100px, mass 2.0, wrecking ball mass 80.\n"
+            "PSYCHOLOGY: Catharsis is the primary driver — the viewer must form an "
+            "emotional connection to the intact structure BEFORE destruction. Show the "
+            "tower standing for 10-15s. The destruction is 'earned' through anticipation. "
+            "Contrast between order (structured tower) and chaos (collapse) creates "
+            "the cathartic response. Resolution: rubble must FULLY settle."
         ),
     }
 
@@ -271,38 +279,16 @@ def _build_concept_developer_prompt(
             break
 
     return [
-        {
-            "role": "system",
-            "content": (
-                "You are a creative director for a short-form video channel that produces "
-                "'Oddly Satisfying' physics simulation videos using Pygame and Pymunk.\n\n"
-                "Your job is to generate 3 RANKED concepts for the selected category. "
-                "Each concept must be:\n"
-                "- Visually distinct and satisfying to watch\n"
-                "- Technically feasible with Pygame + Pymunk (2D rigid body physics)\n"
-                "- Capable of filling a 65-second video with escalating visual interest\n"
-                "- Hook-worthy (the first 2 seconds must intrigue viewers)\n\n"
-                "Technical constraints:\n"
-                "- Render resolution: 1080x1920 (9:16 portrait)\n"
-                "- Target: 60 FPS, 65 seconds\n"
-                "- Physics bodies max: ~500 (performance limit)\n"
-                "- Dark background (#1a1a2e) for visual contrast\n"
-                "- Colourful bodies with distinct colours\n"
-                "- Must have a clear payoff/climax in the final 20% of the video\n\n"
-                "Hook text rules: Maximum 6 words, posed as a question or intriguing statement.\n\n"
-                "Rank concepts by: novelty (how fresh vs existing content) AND "
-                "feasibility (how reliable to implement in Pymunk)."
-            ),
-        },
+        {"role": "system", "content": load_system_prompt("concept_developer").text},
         {
             "role": "user",
-            "content": (
-                f"Category: {category.value}\n"
-                f"Description: {category_descriptions.get(category, 'Physics simulation')}\n"
-                f"Existing videos in this category: {existing_count}\n\n"
-                "Generate 3 ranked concepts. The top concept should be your strongest "
-                "recommendation balancing novelty and feasibility."
-            ),
+            "content": build_user_prompt("concept_developer", {
+                "category": category.value,
+                "category_description": category_descriptions.get(
+                    category, "Physics simulation"
+                ),
+                "existing_count": str(existing_count),
+            }).text,
         },
     ]
 
@@ -332,6 +318,7 @@ async def develop_concept(
             messages=messages,
             response_model=ConceptDeveloperResponse,
             max_retries=2,
+            cache_step="concept_developer",
         )
     except Exception as exc:
         msg = f"Concept Developer failed for category '{category.value}'"
@@ -356,16 +343,18 @@ class PhysicsIdeaAgent(BaseIdeaAgent):
     - Lite mode: uses provided stats, programmatic category selection only
     """
 
-    def __init__(self, *, use_llm_selector: bool = True) -> None:
+    def __init__(self, *, use_llm_selector: bool = True, force_category: str | None = None) -> None:
         """Initialise the Physics Idea Agent.
 
         Args:
             use_llm_selector: If True, use LLM for category selection.
                 If False, use pure programmatic rotation logic.
+            force_category: If set, always use this category (e.g. 'ball_pit').
         """
         self._use_llm_selector = use_llm_selector
+        self._force_category = force_category
 
-    async def generate_concept(self, state: PipelineState) -> ConceptBrief:
+    async def generate_concept(self, input: IdeaAgentInput) -> ConceptBrief:
         """Generate a production-ready concept.
 
         Full pipeline:
@@ -377,7 +366,7 @@ class PhysicsIdeaAgent(BaseIdeaAgent):
         Retries up to MAX_CONCEPT_ATTEMPTS times on failure.
 
         Args:
-            state: Current pipeline state.
+            input: Narrow DTO containing only the pipeline name.
 
         Returns:
             A validated ConceptBrief.
@@ -385,7 +374,7 @@ class PhysicsIdeaAgent(BaseIdeaAgent):
         Raises:
             ConceptGenerationError: If concept generation fails after all retries.
         """
-        pipeline = state.pipeline
+        pipeline = input.pipeline
 
         # Step 1: Build inventory report
         report = await self._build_report(pipeline)
@@ -400,7 +389,12 @@ class PhysicsIdeaAgent(BaseIdeaAgent):
         for attempt in range(1, MAX_CONCEPT_ATTEMPTS + 1):
             try:
                 # Step 2: Select category
-                if self._use_llm_selector:
+                if self._force_category:
+                    selection = CategorySelection(
+                        selected_category=ScenarioCategory(self._force_category),
+                        reasoning=f"Forced category: {self._force_category}",
+                    )
+                elif self._use_llm_selector:
                     selection = await select_category_with_llm(report)
                 else:
                     selected = select_category_from_report(report)

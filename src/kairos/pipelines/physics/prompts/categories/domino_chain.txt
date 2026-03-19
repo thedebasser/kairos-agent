@@ -1,0 +1,189 @@
+﻿---
+version: 1
+description: "Domino chain category prompt"
+---
+## MANDATORY: Physics Parameters (Domino-Specific)
+Pymunk MULTIPLIES elasticity of both colliding shapes.
+- Domino size: width=20px, height=60px (`Poly.create_box(body, (20, 60))`)
+- **Spacing: 35-45px center-to-center** (the 0.6× height rule — must be > domino width)
+- Domino mass: 1.0 | elasticity: 0.1 (LOW = clean toppling) | friction: 0.7
+- Floor elasticity: 0.2 | friction: 0.8
+- space.damping = 0.99
+- space.iterations = 20 (higher prevents mushy contacts)
+- ALWAYS: `moment = pymunk.moment_for_box(mass, (width, height))` — NEVER guess moment
+- **Trigger at t=3s**: `body.apply_impulse_at_local_point((300, 0), (0, -height/2))` (push top edge)
+- Max 150 bodies total
+
+## MANDATORY: Energy Curve (4 phases — psychology-driven)
+Domino chains are Tier 1 satisfaction — they activate 5+ psychological mechanisms simultaneously.
+
+1. **Calm Intro (0-3s)**: Show the FULL domino layout. Every domino standing, motionless.
+   - PSYCHOLOGY: Zeigarnik tension loading at maximum intensity. The brain sees 80+
+     dominoes standing upright and immediately registers an incomplete task: these
+     dominoes SHOULD fall. Each second they remain standing increases the eventual
+     completion reward. The viewer mentally traces the path — seeking system engages.
+   - Gestalt: symmetrical, ordered arrangement provides immediate visual pleasure.
+   - Colour: cool tones dominate. The layout should look CLEAN and geometric.
+
+2. **Trigger (3s)**: First domino pushed. Chain begins.
+   - PSYCHOLOGY: The moment of predictability confirmation — the viewer KNEW this
+     would happen, and the dopamine system rewards the confirmed prediction.
+   - The impulse should be visible (domino tips decisively, not ambiguously).
+
+3. **Cascade (3-50s)**: Dominoes fall in sequence. The wave IS the content.
+   - PSYCHOLOGY: Gestalt 'common fate' — the wave reads as a SINGLE satisfying event,
+     not 80 separate falls. The rhythmic 'click-click-click' creates auditory
+     entrainment — the brain's oscillatory activity synchronises with the external
+     rhythm, producing calm focused attention.
+   - Each domino confirming the prediction delivers a small dopamine hit.
+   - Colour-coded sections create narrative 'chapters' (Gestalt similarity).
+
+4. **Resolution (50-{{ target_duration_sec }}s)**: Last dominoes fall. Completion.
+   - PSYCHOLOGY: The final domino resolves ALL Zeigarnik tension. The brain
+     delivers the 'just right' signal — the chain is done, start to finish.
+     The viewer's heart rate reaches its lowest point.
+   - The LAST domino click should be clearly visible and distinct.
+
+## Layout Rules
+Keep it SIMPLE — all dominoes on ONE ground plane.
+- Straight line, gentle S-curve, or single arc. NOT spirals, multi-level, or mazes.
+- Colour-code sections using the palette (every 10-15 dominoes = new colour).
+- Place all dominoes at the start — they stand upright until triggered.
+
+## Drawing Rotated Rectangles (CRITICAL for dominoes)
+```python
+def draw_domino(screen, body, width, height, color):
+    """pygame.transform.rotate() expands the bounding box.
+    MUST re-center with get_rect(center=...) to prevent visual drift."""
+    surf = pygame.Surface((width, height), pygame.SRCALPHA)
+    pygame.draw.rect(surf, color, (0, 0, width, height))
+    angle_deg = math.degrees(body.angle)
+    rotated = pygame.transform.rotate(surf, -angle_deg)  # negative for screen coords
+    rect = rotated.get_rect(center=(int(body.position.x), int(body.position.y)))
+    screen.blit(rotated, rect)
+```
+
+## VERIFIED WORKING EXAMPLE (domino chain, simplified)
+Study this working code structure — your output MUST follow the same patterns:
+```python
+import pygame
+import pymunk
+import pymunk.pygame_util
+import subprocess
+import random
+import math
+import os
+
+pymunk.pygame_util.positive_y_is_up = False  # CRITICAL
+
+WIDTH, HEIGHT = 1080, 1920
+FPS = 30
+DURATION = 65
+TOTAL_FRAMES = FPS * DURATION
+SEED = 42
+random.seed(SEED)
+
+PALETTE = [(255,107,107),(254,202,87),(29,209,161),(72,219,251),(162,155,254)]
+BG = (26, 26, 46)
+
+os.environ['SDL_VIDEODRIVER'] = 'dummy'
+os.environ['SDL_AUDIODRIVER'] = 'dummy'
+pygame.init()
+screen = pygame.Surface((WIDTH, HEIGHT))
+
+space = pymunk.Space()
+space.gravity = (0, 981)
+space.damping = 0.99
+space.iterations = 20
+
+# Floor
+static = space.static_body
+floor = pymunk.Segment(static, (0, HEIGHT - 100), (WIDTH, HEIGHT - 100), 5)
+floor.elasticity = 0.2; floor.friction = 0.8; space.add(floor)
+
+# Domino parameters
+DOMINO_W, DOMINO_H = 20, 60
+SPACING = 38  # 0.6 × 60 ≈ 36, use 38 for safety
+NUM_DOMINOES = 80
+
+dominoes = []
+floor_y = HEIGHT - 100 - DOMINO_H / 2  # Stand upright on floor
+
+# S-curve path
+for i in range(NUM_DOMINOES):
+    progress = i / NUM_DOMINOES
+    x = 150 + (WIDTH - 300) * progress
+    # Gentle sine wave offset
+    y_offset = math.sin(progress * math.pi * 2) * 100
+    y = floor_y + y_offset * 0  # Keep on ground (y_offset for x-variation if desired)
+    x += math.sin(progress * math.pi) * 200  # Slight arc
+
+    mass = 1.0
+    moment = pymunk.moment_for_box(mass, (DOMINO_W, DOMINO_H))
+    body = pymunk.Body(mass, moment)
+    body.position = (x, floor_y)
+    shape = pymunk.Poly.create_box(body, (DOMINO_W, DOMINO_H))
+    shape.elasticity = 0.1; shape.friction = 0.7
+    space.add(body, shape)
+    color = PALETTE[i * len(PALETTE) // NUM_DOMINOES]
+    dominoes.append((body, shape, color))
+
+triggered = False
+
+os.makedirs('/workspace/output', exist_ok=True)
+pipe = subprocess.Popen([
+    'ffmpeg', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb24',
+    '-s', f'{WIDTH}x{HEIGHT}', '-r', str(FPS), '-i', '-',
+    '-c:v', 'libx264', '-preset', 'fast', '-pix_fmt', 'yuv420p',
+    '-crf', '23', '/workspace/output/simulation.mp4'
+], stdin=subprocess.PIPE)
+
+for frame in range(TOTAL_FRAMES):
+    t = frame / FPS
+
+    if t >= 3.0 and not triggered:
+        first = dominoes[0][0]
+        first.apply_impulse_at_local_point((300, 0), (0, -DOMINO_H/2))
+        triggered = True
+
+    space.step(1/60); space.step(1/60)
+
+    screen.fill(BG)
+    pygame.draw.line(screen, (80,80,100), (0, HEIGHT-100), (WIDTH, HEIGHT-100), 4)
+
+    for body, shape, color in dominoes:
+        surf = pygame.Surface((DOMINO_W, DOMINO_H), pygame.SRCALPHA)
+        pygame.draw.rect(surf, color, (0, 0, DOMINO_W, DOMINO_H))
+        rotated = pygame.transform.rotate(surf, -math.degrees(body.angle))
+        rect = rotated.get_rect(center=(int(body.position.x), int(body.position.y)))
+        screen.blit(rotated, rect)
+
+    pipe.stdin.write(pygame.image.tostring(screen, 'RGB'))
+
+pipe.stdin.close(); pipe.wait()
+print(f"PAYOFF_TIMESTAMP=3.0")
+print(f"PEAK_BODY_COUNT={len(dominoes)}")
+```
+
+## PSYCHOLOGY: Colour Design
+- Background: DARK (#16213e or #1a1a2e) — clean, geometric feel suits domino chains.
+- Dominoes: Colour-code SECTIONS (every 10-15 dominoes = new colour from palette).
+  This activates Gestalt similarity — each section feels like a narrative 'chapter'.
+  `colour = PALETTE[i * len(PALETTE) // NUM_DOMINOES]`
+- Recommended palette: Candy Bright — orchid, muted purple, rose, blush, light salmon.
+- The colour progression creates a visual timeline — viewer can see which section
+  has already fallen versus which is still standing (Zeigarnik tension visualised).
+- Gestalt continuity: use smooth paths (gentle S-curves) — the brain prefers
+  continuous paths and resists sharp angles.
+
+## Quality Checklist
+- [ ] `pymunk.pygame_util.positive_y_is_up = False` is set FIRST
+- [ ] `space.gravity = (0, 981)` and `space.iterations = 20`
+- [ ] All moments use `pymunk.moment_for_box(mass, (w, h))`
+- [ ] Spacing 35-45px center-to-center (> domino width)
+- [ ] Dominoes rendered with rotated rectangles (re-centered)
+- [ ] Chain reaction propagates from first to last (complete — no stuck dominoes)
+- [ ] Trigger at ~3s with `apply_impulse_at_local_point`
+- [ ] ALL dominoes fall — the chain reaches unambiguous completion
+- [ ] Colour-coded sections for Gestalt grouping
+- [ ] PAYOFF_TIMESTAMP and PEAK_BODY_COUNT printed to stdout

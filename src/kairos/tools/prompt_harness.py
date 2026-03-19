@@ -233,7 +233,7 @@ async def run_harness(
     # ----- Generate code -----
     console.print("\n[bold]Generating simulation code...[/bold]")
     start = time.monotonic()
-    code = await agent.generate_simulation(concept, state)
+    code = await agent.generate_simulation(concept)
     gen_time = time.monotonic() - start
     console.print(f"[green]Generated {len(code)} chars in {gen_time:.1f}s[/green]")
 

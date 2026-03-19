@@ -108,9 +108,27 @@ class ScenarioCategory(str, Enum):
     """POC scenario categories for Oddly Satisfying Physics pipeline."""
 
     BALL_PIT = "ball_pit"
-    MARBLE_FUNNEL = "marble_funnel"
-    DOMINO_CHAIN = "domino_chain"
+    # MARBLE_FUNNEL = "marble_funnel"  # disabled — ramp geometry needs work
+    # DOMINO_CHAIN = "domino_chain"  # disabled — doesn't work for portrait
     DESTRUCTION = "destruction"
+
+
+class MarbleArchetype(str, Enum):
+    """Archetype categories for the Blender marble course pipeline."""
+
+    FUNNEL_RACE = "funnel_race"
+    RACE_LANE = "race_lane"
+    PEG_MAZE = "peg_maze"
+
+
+class DominoArchetype(str, Enum):
+    """Archetype categories for the Blender domino run pipeline."""
+
+    SPIRAL = "spiral"
+    S_CURVE = "s_curve"
+    BRANCHING = "branching"
+    WORD_SPELL = "word_spell"
+    CASCADE = "cascade"
 
 
 # =============================================================================
@@ -229,6 +247,135 @@ class ValidationCheck(BaseModel, frozen=True):
     threshold: Any = None  # noqa: ANN401
 
 
+# ---------------------------------------------------------------------------
+# Structured validation feedback (AI review §2)
+# ---------------------------------------------------------------------------
+
+
+class FailedCheck(BaseModel, frozen=True):
+    """One failed validation check enriched with quantitative delta."""
+
+    check_name: str
+    actual: float | None = None
+    target_min: float | None = None
+    target_max: float | None = None
+    delta: float | None = None
+    suggested_fix: str = ""
+    historical_note: str = ""
+
+
+class PastFix(BaseModel, frozen=True):
+    """A fix from a previous run that resolved the same check."""
+
+    category: str
+    check_name: str
+    parameter_changed: str
+    old_value: str
+    new_value: str
+    worked: bool = True
+
+
+class ValidationFeedback(BaseModel, frozen=True):
+    """Structured feedback for the LLM adjustment step (AI review §2)."""
+
+    failed_checks: list[FailedCheck] = Field(default_factory=list)
+    suggested_parameter_changes: dict[str, str] = Field(default_factory=dict)
+    similar_past_fixes: list[PastFix] = Field(default_factory=list)
+    iteration: int = 1
+    max_iterations: int = 5
+    urgency: str = Field(
+        default="minor_tweak",
+        description="'minor_tweak' | 'significant_change' | 'fundamental_rethink'",
+    )
+    iteration_history_summary: str = Field(
+        default="",
+        description="Summary of what was already tried in earlier iterations.",
+    )
+
+    def to_prompt_text(self) -> str:
+        """Render this feedback as a prompt section for the LLM."""
+        lines: list[str] = [f"### Structured Validation Feedback (iteration {self.iteration}/{self.max_iterations})"]
+        lines.append(f"**Urgency:** {self.urgency}")
+        if self.failed_checks:
+            lines.append("\n**Failed checks:**")
+            for fc in self.failed_checks:
+                parts = [f"- **{fc.check_name}**: actual={fc.actual}"]
+                if fc.target_min is not None or fc.target_max is not None:
+                    parts.append(f"  target=[{fc.target_min}, {fc.target_max}]")
+                if fc.delta is not None:
+                    parts.append(f"  delta={fc.delta:+.2f}")
+                if fc.suggested_fix:
+                    parts.append(f"  → {fc.suggested_fix}")
+                if fc.historical_note:
+                    parts.append(f"  (historical: {fc.historical_note})")
+                lines.append(" ".join(parts))
+        if self.suggested_parameter_changes:
+            lines.append("\n**Suggested parameter changes:**")
+            for param, suggestion in self.suggested_parameter_changes.items():
+                lines.append(f"- `{param}`: {suggestion}")
+        if self.similar_past_fixes:
+            lines.append("\n**Fixes that worked in similar past runs:**")
+            for pf in self.similar_past_fixes[:3]:
+                lines.append(f"- {pf.parameter_changed}: {pf.old_value} → {pf.new_value} ({pf.category})")
+        if self.iteration_history_summary:
+            lines.append(f"\n**Already tried this run:**\n{self.iteration_history_summary}")
+        return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Category knowledge (AI review §6)
+# ---------------------------------------------------------------------------
+
+
+class CategoryKnowledge(BaseModel):
+    """Accumulated knowledge about what works for a category.
+
+    Stored as JSONB in ``category_stats.knowledge`` and injected into
+    generation prompts for returning categories.
+    """
+
+    category: str = ""
+    parameter_ranges: dict[str, list[float]] = Field(
+        default_factory=dict,
+        description="param_name → [min_that_worked, max_that_worked]",
+    )
+    common_failure_modes: list[str] = Field(default_factory=list)
+    avg_iterations_to_pass: float = 0.0
+    successful_code_patterns: list[str] = Field(
+        default_factory=list,
+        description="Short descriptions of approaches that worked",
+    )
+    failed_code_patterns: list[str] = Field(
+        default_factory=list,
+        description="Approaches that consistently fail",
+    )
+    best_duration_setting: float = 0.0
+    total_examples: int = 0
+
+    def to_prompt_text(self) -> str:
+        """Render as a prompt section for injection into code-generation prompts."""
+        if self.total_examples == 0:
+            return ""
+        lines = [f"### What we know about '{self.category}' (from {self.total_examples} past runs)"]
+        if self.best_duration_setting:
+            lines.append(f"- Best SIMULATION_TIME setting: {self.best_duration_setting}")
+        if self.avg_iterations_to_pass:
+            lines.append(f"- Average iterations to pass validation: {self.avg_iterations_to_pass:.1f}")
+        if self.parameter_ranges:
+            lines.append("- Known good parameter ranges:")
+            for param, rng in self.parameter_ranges.items():
+                lines.append(f"  - {param}: {rng[0]} – {rng[1]}")
+        if self.common_failure_modes:
+            lines.append("- Common failure modes to avoid:")
+            for fm in self.common_failure_modes[:5]:
+                lines.append(f"  - {fm}")
+        if self.successful_code_patterns:
+            lines.append("- Approaches that work:")
+            for sp in self.successful_code_patterns[:3]:
+                lines.append(f"  - {sp}")
+        return "\n".join(lines)
+
+
 class ValidationResult(BaseModel, frozen=True):
     """Aggregated result of all validation checks on a simulation output."""
 
@@ -254,6 +401,77 @@ class ValidationResult(BaseModel, frozen=True):
         total = len(self.checks)
         passed = sum(1 for c in self.checks if c.passed)
         return f"{passed}/{total} checks passed"
+
+
+# =============================================================================
+# Review Data Contracts
+# =============================================================================
+
+
+class ReviewIssueSeverity(str, Enum):
+    """Severity level for a review issue."""
+
+    CRITICAL = "critical"    # auto-reject
+    MAJOR = "major"          # likely reject unless only finding
+    MINOR = "minor"          # warning, does not cause rejection
+    INFO = "info"            # informational note
+
+
+class ReviewIssue(BaseModel, frozen=True):
+    """Single issue found during video or audio review."""
+
+    category: str = Field(description="Issue category, e.g. 'broken_physics', 'bad_framing', 'audio_artifact'")
+    severity: ReviewIssueSeverity = Field(default=ReviewIssueSeverity.MAJOR)
+    description: str = Field(description="Human-readable description of the issue")
+    timestamp_sec: float | None = Field(default=None, description="Approximate timestamp in the video/audio where the issue occurs")
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0, description="Model confidence in this finding (0-1)")
+
+
+class VideoReviewResult(BaseModel, frozen=True):
+    """Structured result from the Video Review Agent."""
+
+    passed: bool = Field(description="True if the video passed review with no critical/major issues")
+    overall_confidence: float = Field(default=1.0, ge=0.0, le=1.0, description="Overall reviewer confidence (0-1). Low confidence triggers escalation.")
+    issues: list[ReviewIssue] = Field(default_factory=list, description="List of identified issues")
+    model_used: str = Field(default="", description="Model alias that produced this review")
+    escalated: bool = Field(default=False, description="Whether this review was escalated to the heavier model")
+    pre_check_scores: dict[str, float] = Field(default_factory=dict, description="Optional pre-check scores, e.g. {'dover_technical': 0.7, 'aesthetic': 5.2}")
+
+    @property
+    def summary(self) -> str:
+        """Human-readable summary."""
+        critical = sum(1 for i in self.issues if i.severity == ReviewIssueSeverity.CRITICAL)
+        major = sum(1 for i in self.issues if i.severity == ReviewIssueSeverity.MAJOR)
+        return f"{'PASS' if self.passed else 'FAIL'} | {critical} critical, {major} major issues | confidence={self.overall_confidence:.2f}"
+
+
+class LoudnessMetrics(BaseModel, frozen=True):
+    """FFmpeg ebur128 loudness measurement results."""
+
+    integrated_lufs: float = Field(description="Integrated loudness in LUFS")
+    true_peak_dbtp: float = Field(description="True peak in dBTP")
+    loudness_range_lu: float = Field(default=0.0, description="Loudness range in LU")
+    passed: bool = Field(default=True, description="Whether loudness is within acceptable range")
+    details: str = Field(default="", description="Additional measurement details")
+
+
+class AudioReviewResult(BaseModel, frozen=True):
+    """Structured result from the Audio Review Agent."""
+
+    passed: bool = Field(description="True if the audio passed review")
+    issues: list[ReviewIssue] = Field(default_factory=list, description="List of identified issues")
+    model_used: str = Field(default="", description="Model alias or 'specialist_stack'")
+    loudness: LoudnessMetrics | None = Field(default=None, description="FFmpeg loudness measurement (always populated)")
+    tts_wer: float | None = Field(default=None, description="TTS word error rate (0-1) if transcript check was run")
+    dnsmos_scores: dict[str, float] | None = Field(default=None, description="DNSMOS P.835 scores: sig, bak, ovrl (1-5 MOS)")
+
+    @property
+    def summary(self) -> str:
+        """Human-readable summary."""
+        critical = sum(1 for i in self.issues if i.severity == ReviewIssueSeverity.CRITICAL)
+        major = sum(1 for i in self.issues if i.severity == ReviewIssueSeverity.MAJOR)
+        lufs_str = f" | {self.loudness.integrated_lufs:.1f} LUFS" if self.loudness else ""
+        return f"{'PASS' if self.passed else 'FAIL'} | {critical} critical, {major} major issues{lufs_str}"
 
 
 class Caption(BaseModel, frozen=True):
@@ -320,6 +538,32 @@ class VideoOutput(BaseModel, frozen=True):
 # =============================================================================
 
 
+class IdeaAgentInput(BaseModel, frozen=True):
+    """Narrow input DTO for the Idea Agent (Finding 2.2).
+
+    Only exposes the fields that ``generate_concept`` actually reads,
+    rather than passing the entire 24-field ``PipelineState``.
+    """
+
+    pipeline: str = "physics"
+
+
+class SimulationLoopResult(BaseModel):
+    """Narrow output DTO from the simulation iteration loop (Finding 2.2).
+
+    Contains only the fields that ``run_loop`` writes.  The graph node
+    is responsible for mapping this back into the ``PipelineGraphState``.
+    """
+
+    simulation_code: str = ""
+    simulation_result: SimulationResult | None = None
+    simulation_stats: SimulationStats | None = None
+    validation_result: ValidationResult | None = None
+    simulation_iteration: int = 0
+    raw_video_path: str = ""
+    errors: list[str] = Field(default_factory=list)
+
+
 class PipelineState(BaseModel):
     """LangGraph state object — mutable during pipeline execution.
 
@@ -341,6 +585,7 @@ class PipelineState(BaseModel):
     validation_result: ValidationResult | None = None
     simulation_iteration: int = 0
     raw_video_path: str = ""
+    theme_name: str = ""
 
     # Video editing phase
     captions: CaptionSet | None = None
@@ -348,9 +593,18 @@ class PipelineState(BaseModel):
     final_video_path: str = ""
     video_output: VideoOutput | None = None
 
-    # Review phase
+    # Review phase — automated
+    video_review_result: VideoReviewResult | None = None
+    audio_review_result: AudioReviewResult | None = None
+    video_review_attempts: int = 0
+    audio_review_attempts: int = 0
+
+    # Review phase — human
     review_action: ReviewAction | None = None
     review_feedback: str = ""
+
+    # Output versioning — tracks review-triggered re-renders (§1)
+    output_version: int = 1
 
     # Tracking
     total_cost_usd: float = 0.0

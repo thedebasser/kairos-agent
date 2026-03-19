@@ -1,0 +1,202 @@
+﻿---
+version: 1
+description: "Ball pit category prompt"
+---
+## MANDATORY: Physics Parameters
+Pymunk MULTIPLIES elasticity of both colliding shapes: ball(0.7) × wall(0.5) = effective 0.35 bounce.
+Set both sides higher than you think!
+- Ball radius: 15-30px | mass: 1.0-3.0 | elasticity: 0.7-0.85 | friction: 0.3-0.5
+- Wall/platform elasticity: 0.5-0.7 | friction: 0.5-0.7
+- space.damping = 0.99 (light air drag, keeps things moving)
+- ALWAYS: `moment = pymunk.moment_for_circle(mass, 0, radius)` — NEVER guess moment
+- Max 200 bodies. Remove offscreen bodies (y > HEIGHT+200) every frame.
+
+## MANDATORY: Energy Curve (4 phases — psychology-driven)
+Each phase serves a specific neurological function. Follow this structure precisely.
+
+1. **Calm Intro (0-15s)**: 1-2 balls/sec. Viewer orients to scene.
+   - PSYCHOLOGY: Zeigarnik tension loading — the viewer sees the container
+     slowly filling and their brain registers an incomplete task. The longer
+     they see this unfinished state, the greater the completion reward later.
+   - Gestalt activation — the ordered platforms provide immediate visual pleasure.
+   - Colour temperature: cool-dominant (blues, greens, purples enter first).
+
+2. **Building (15-40s)**: 3-5 balls/sec. More collisions, increasing density.
+   - PSYCHOLOGY: Each bounce confirms the viewer's prediction → small dopamine hit.
+     Pattern recognition kicks in as the brain tracks colour groupings and flow.
+   - Mirror neurons intensify with more simultaneous visual inputs.
+   - Colour: warm colours gradually increase (oranges, pinks introduced).
+
+3. **Climax (40-55s)**: Peak chaos. A DRAMATIC EVENT must happen (gate burst, wall collapse, overflow).
+   - PSYCHOLOGY: This is the cathartic release. Nucleus accumbens fires maximally.
+     The dramatic event MUST exist — balls bouncing indefinitely with no climax is
+     the LOWEST satisfaction tier. Container overflow/burst = Tier 1 satisfaction.
+   - Colour: peak saturation and warmth. Maximum visual energy.
+
+4. **Resolution (55-{{ target_duration_sec }}s)**: No new spawns. Natural settling.
+   - PSYCHOLOGY: Zeigarnik tension fully resolves. The 'just right' signal fires
+     when ALL objects reach their final positions. Any residual jiggling or unsettled
+     objects undermine the completion reward. The brain releases cognitive resources
+     it held in reserve → feeling of relief.
+   - Colour: returning to cool tones. Final bounces clearly audible in relative quiet.
+   - The LAST ball stopping is the psychological full stop — make it visible.
+
+## Scene Construction
+Keep it SIMPLE: 2-4 static platforms/funnels made from `pymunk.Segment`.
+```python
+# Angled ramp example:
+seg = pymunk.Segment(space.static_body, (100, 500), (500, 650), 5)
+seg.elasticity = 0.5; seg.friction = 0.6; space.add(seg)
+
+# Breakable gate (remove at climax):
+gate_body = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
+gate_body.position = (WIDTH//2, 1200)
+gate_seg = pymunk.Segment(gate_body, (-200, 0), (200, 0), 5)
+gate_seg.elasticity = 0.3; gate_seg.friction = 0.5
+space.add(gate_body, gate_seg)
+# At climax: space.remove(gate_seg, gate_body)
+```
+
+## Drawing Functions (use these exactly)
+```python
+def draw_ball(surface, body, shape, color):
+    pos = (int(body.position.x), int(body.position.y))
+    r = int(shape.radius)
+    pygame.draw.circle(surface, color, pos, r)
+    hl = tuple(min(c + 60, 255) for c in color[:3])
+    pygame.draw.circle(surface, hl, (pos[0] - r//3, pos[1] - r//3), max(1, r//3))
+
+def draw_segment(surface, seg, color=(100, 100, 120), width=4):
+    a = (int(seg.a.x + seg.body.position.x), int(seg.a.y + seg.body.position.y))
+    b = (int(seg.b.x + seg.body.position.x), int(seg.b.y + seg.body.position.y))
+    pygame.draw.line(surface, color, a, b, width)
+```
+
+## VERIFIED WORKING EXAMPLE (ball pit, simplified)
+Study this working code structure — your output MUST follow the same patterns:
+```python
+import pygame
+import pymunk
+import pymunk.pygame_util
+import subprocess
+import random
+import math
+import os
+
+pymunk.pygame_util.positive_y_is_up = False  # CRITICAL
+
+WIDTH, HEIGHT = 1080, 1920
+FPS = 30
+DURATION = 65
+TOTAL_FRAMES = FPS * DURATION
+SEED = 42
+random.seed(SEED)
+
+PALETTE = [(255,179,186),(255,223,186),(186,255,201),(186,225,255),(209,186,255)]
+BG = (26, 26, 46)
+
+os.environ['SDL_VIDEODRIVER'] = 'dummy'
+os.environ['SDL_AUDIODRIVER'] = 'dummy'
+pygame.init()
+screen = pygame.Surface((WIDTH, HEIGHT))
+
+space = pymunk.Space()
+space.gravity = (0, 900)
+space.damping = 0.99
+
+# Boundaries
+static = space.static_body
+for seg_pts, elasticity in [
+    (((0, HEIGHT-10), (WIDTH, HEIGHT-10)), 0.5),  # Floor
+    (((0, 0), (0, HEIGHT)), 0.4),                  # Left wall
+    (((WIDTH, 0), (WIDTH, HEIGHT)), 0.4),           # Right wall
+]:
+    seg = pymunk.Segment(static, seg_pts[0], seg_pts[1], 10)
+    seg.elasticity = elasticity; seg.friction = 0.6; space.add(seg)
+
+# Platforms
+plat1 = pymunk.Segment(static, (50, 600), (WIDTH//2-40, 750), 5)
+plat1.elasticity = 0.5; plat1.friction = 0.6; space.add(plat1)
+plat2 = pymunk.Segment(static, (WIDTH-50, 600), (WIDTH//2+40, 750), 5)
+plat2.elasticity = 0.5; plat2.friction = 0.6; space.add(plat2)
+
+balls = []
+
+def spawn_ball(x, y):
+    radius = random.uniform(15, 28)
+    mass = radius / 10.0
+    moment = pymunk.moment_for_circle(mass, 0, radius)
+    body = pymunk.Body(mass, moment)
+    body.position = (x, y)
+    shape = pymunk.Circle(body, radius)
+    shape.elasticity = 0.7
+    shape.friction = 0.4
+    space.add(body, shape)
+    balls.append((body, shape, random.choice(PALETTE)))
+
+os.makedirs('/workspace/output', exist_ok=True)
+pipe = subprocess.Popen([
+    'ffmpeg', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb24',
+    '-s', f'{WIDTH}x{HEIGHT}', '-r', str(FPS), '-i', '-',
+    '-c:v', 'libx264', '-preset', 'fast', '-pix_fmt', 'yuv420p',
+    '-crf', '23', '/workspace/output/simulation.mp4'
+], stdin=subprocess.PIPE)
+
+peak_count = 0
+for frame in range(TOTAL_FRAMES):
+    t = frame / FPS
+    if t < 15:     rate = 1
+    elif t < 40:   rate = 4
+    elif t < 55:   rate = 6
+    else:          rate = 0
+    if rate > 0 and frame % max(1, FPS // rate) == 0:
+        spawn_ball(random.uniform(100, WIDTH-100), 50)
+
+    space.step(1/60); space.step(1/60)
+
+    for entry in balls[:]:
+        if entry[0].position.y > HEIGHT + 200:
+            space.remove(entry[0], entry[1]); balls.remove(entry)
+    peak_count = max(peak_count, len(balls))
+
+    screen.fill(BG)
+    for s in space.shapes:
+        if isinstance(s, pymunk.Segment) and s.body.body_type == pymunk.Body.STATIC:
+            a = (int(s.a.x+s.body.position.x), int(s.a.y+s.body.position.y))
+            b = (int(s.b.x+s.body.position.x), int(s.b.y+s.body.position.y))
+            pygame.draw.line(screen, (100,100,120), a, b, 4)
+    for body, shape, color in balls:
+        pos = (int(body.position.x), int(body.position.y))
+        r = int(shape.radius)
+        pygame.draw.circle(screen, color, pos, r)
+        hl = tuple(min(c+60,255) for c in color)
+        pygame.draw.circle(screen, hl, (pos[0]-r//3,pos[1]-r//3), max(1,r//3))
+
+    pipe.stdin.write(pygame.image.tostring(screen, 'RGB'))
+
+pipe.stdin.close(); pipe.wait()
+print(f"PAYOFF_TIMESTAMP=40.0")
+print(f"PEAK_BODY_COUNT={peak_count}")
+```
+
+## PSYCHOLOGY: Colour Design
+- Background: DARK (#1a1a2e or #0d1117) — figure-ground separation, cinema effect, feed contrast.
+- Objects: PASTEL-BRIGHT — low cognitive load, childhood association, perceived softness.
+- Rainbow sequencing: cycle through palette by spawn index so colour encodes TIME:
+  `ball_colour = PALETTE[spawn_index % len(PALETTE)]`
+  This transforms chaos into visual narrative — viewer sees WHEN each ball arrived.
+- 60:30:10 rule: 60% dark background, 30% pastel balls, 10% highlights/glow.
+- Highlight dot on each ball (offset -r//3, -r//3) adds perceived 3D roundness and
+  triggers mirror neuron tactile response — the viewer 'feels' the balls as physical.
+
+## Quality Checklist
+- [ ] `pymunk.pygame_util.positive_y_is_up = False` is set FIRST
+- [ ] `space.gravity = (0, 900)` (Y-down)
+- [ ] All moments use `pymunk.moment_for_circle(mass, 0, radius)`
+- [ ] Balls visibly MOVE, BOUNCE, and INTERACT
+- [ ] Dramatic climax event at ~40-55s (Tier 1: container burst/overflow)
+- [ ] Offscreen bodies removed each frame
+- [ ] Max body count stays under 200
+- [ ] Clear end state — all balls settled, no residual jiggling
+- [ ] Rainbow colour sequence encodes spawn order
+- [ ] PAYOFF_TIMESTAMP and PEAK_BODY_COUNT printed to stdout

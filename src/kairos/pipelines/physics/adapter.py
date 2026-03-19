@@ -9,10 +9,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from kairos.agents.base import (
+    BaseAudioReviewAgent,
     BaseIdeaAgent,
     BasePipelineAdapter,
     BaseSimulationAgent,
     BaseVideoEditorAgent,
+    BaseVideoReviewAgent,
 )
 from kairos.models.contracts import ScenarioCategory
 from kairos.pipeline.registry import register_pipeline
@@ -56,6 +58,18 @@ class PhysicsPipelineAdapter(BasePipelineAdapter):
         from kairos.pipelines.physics.video_editor_agent import PhysicsVideoEditorAgent
 
         return PhysicsVideoEditorAgent()
+
+    def get_video_review_agent(self) -> BaseVideoReviewAgent:
+        """Return the shared video review agent."""
+        from kairos.services.video_review import VideoReviewAgent
+
+        return VideoReviewAgent()
+
+    def get_audio_review_agent(self) -> BaseAudioReviewAgent:
+        """Return the shared audio review agent."""
+        from kairos.services.audio_review import AudioReviewAgent
+
+        return AudioReviewAgent()
 
     def get_sandbox_dockerfile(self) -> str:
         """Return path to the sandbox Dockerfile for physics simulations."""

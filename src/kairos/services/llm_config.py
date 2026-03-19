@@ -169,3 +169,17 @@ def get_ollama_base_url() -> str:
         return env
     cfg = _load_raw_config()
     return cfg.get("ollama", {}).get("base_url", "http://localhost:11434")
+
+
+def get_thinking_config() -> dict[str, Any] | None:
+    """Return the extended thinking params for Anthropic models, or *None*.
+
+    When enabled, returns ``{"type": "enabled", "budget_tokens": N}``
+    ready to pass straight into ``litellm.completion(thinking=...)``.
+    """
+    cfg = _load_raw_config()
+    thinking = cfg.get("thinking", {})
+    if not thinking.get("enabled", False):
+        return None
+    budget = int(thinking.get("budget_tokens", 10_000))
+    return {"type": "enabled", "budget_tokens": budget}

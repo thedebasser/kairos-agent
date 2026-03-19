@@ -1,10 +1,13 @@
 """Kairos Agent — Database Session Management.
 
 Async SQLAlchemy session factory for PostgreSQL.
+Engine and session factory are cached as module-level singletons to prevent
+connection pool leaks (Finding 4.5 — kairos_architectural_review).
 """
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import (
@@ -16,26 +19,43 @@ from sqlalchemy.ext.asyncio import (
 
 from kairos.config import get_settings
 
+logger = logging.getLogger(__name__)
+
+# Module-level singletons (Finding 4.5)
+_engine: AsyncEngine | None = None
+_session_factory_instance: async_sessionmaker[AsyncSession] | None = None
+
 
 def get_engine() -> AsyncEngine:
-    """Create the async SQLAlchemy engine."""
-    settings = get_settings()
-    return create_async_engine(
-        settings.database_url,
-        echo=False,
-        pool_size=5,
-        max_overflow=10,
-    )
+    """Get the async SQLAlchemy engine (cached singleton)."""
+    global _engine  # noqa: PLW0603
+    if _engine is None:
+        settings = get_settings()
+        _engine = create_async_engine(
+            settings.database_url,
+            echo=False,
+            pool_size=5,
+            max_overflow=10,
+        )
+        logger.info("Created async SQLAlchemy engine")
+    return _engine
 
 
 def get_session_factory() -> async_sessionmaker[AsyncSession]:
-    """Create session factory bound to the engine."""
-    engine = get_engine()
-    return async_sessionmaker(
-        engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
+    """Get the session factory (cached singleton, bound to the engine)."""
+    global _session_factory_instance  # noqa: PLW0603
+    if _session_factory_instance is None:
+        engine = get_engine()
+        _session_factory_instance = async_sessionmaker(
+            engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+    return _session_factory_instance
+
+
+# Alias used by llm_routing.py and cli.py (Finding 4.4)
+async_session_factory = get_session_factory
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
@@ -48,3 +68,16 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
         except Exception:
             await session.rollback()
             raise
+
+
+async def dispose_engine() -> None:
+    """Dispose the engine and release all pooled connections.
+
+    Call during clean shutdown.
+    """
+    global _engine, _session_factory_instance  # noqa: PLW0603
+    if _engine is not None:
+        await _engine.dispose()
+        _engine = None
+        _session_factory_instance = None
+        logger.info("Disposed async SQLAlchemy engine")
