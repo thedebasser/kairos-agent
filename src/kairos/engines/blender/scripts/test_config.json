@@ -1,0 +1,19 @@
+{
+  "seed": 42,
+  "archetype": "race_lane",
+  "marble_count": 5,
+  "marble_radius": 0.04,
+  "marble_bounce": 0.4,
+  "marble_friction": 0.6,
+  "marble_mass": 1.0,
+  "palette": "neon",
+  "camera_style": "marble_follow",
+  "lighting_preset": "studio",
+  "duration_sec": 65,
+  "fps": 30,
+  "substeps_per_frame": 20,
+  "solver_iterations": 20,
+  "module_sequence": null,
+  "n_zigzags": 3,
+  "gate_open_frame": 30
+}

@@ -1,0 +1,41 @@
+{
+  "seed": 42,
+  "archetype": "zigzag_race",
+  "module_count": 13,
+  "module_names": [
+    "start_platform_001",
+    "ramp_001",
+    "turn_001",
+    "ramp_002",
+    "turn_002",
+    "ramp_003",
+    "turn_003",
+    "ramp_004",
+    "turn_004",
+    "ramp_005",
+    "turn_005",
+    "ramp_006",
+    "finish_tray_001"
+  ],
+  "marble_count": 5,
+  "course_center": [
+    16.303329467773438,
+    0.0,
+    -15.575855255126953
+  ],
+  "course_bounds_min": [
+    -0.30000001192092896,
+    -4.599999904632568,
+    -33.151710510253906
+  ],
+  "course_bounds_max": [
+    32.90665817260742,
+    4.599999904632568,
+    2.0
+  ],
+  "duration_frames": 1950,
+  "fps": 30,
+  "camera_style": "marble_follow",
+  "lighting_preset": "studio",
+  "palette": "neon"
+}
