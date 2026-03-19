@@ -148,10 +148,6 @@ ignore = [
 [tool.ruff.lint.isort]
 known-first-party = ["kairos"]
 
-[tool.ruff.lint.pydantic]
-# Ruff recognises Pydantic models for type-checking rules
-root-are-public = true
-
 # =============================================================================
 # mypy Configuration
 # =============================================================================
