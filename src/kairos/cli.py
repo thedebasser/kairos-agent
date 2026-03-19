@@ -5,6 +5,8 @@ Supports:
     pipeline resume    — Resume a checkpointed pipeline run
     pipeline restart   — Restart a failed pipeline run
     pipeline status    — Show status of recent pipeline runs
+    pipeline stats     — Show aggregate pipeline statistics
+    pipeline cache     — Show or manage the response cache
 """
 
 from __future__ import annotations
@@ -60,6 +62,51 @@ def cli() -> None:
         help="Number of recent runs to show",
     )
 
+    # pipeline inspect <run_id>
+    inspect_parser = subparsers.add_parser("inspect", help="Inspect a run's step artifacts")
+    inspect_parser.add_argument(
+        "run_id",
+        type=str,
+        nargs="?",
+        default=None,
+        help="Pipeline run ID to inspect (default: latest run)",
+    )
+    inspect_parser.add_argument(
+        "--step",
+        type=int,
+        default=None,
+        help="Show only a specific step number (e.g. --step 1)",
+    )
+
+    # pipeline stats
+    stats_parser = subparsers.add_parser("stats", help="Show aggregate pipeline statistics")
+    stats_parser.add_argument(
+        "--days",
+        type=int,
+        default=7,
+        help="Number of days to aggregate (default: 7)",
+    )
+    stats_parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="as_json",
+        help="Output stats as JSON",
+    )
+
+    # pipeline cache
+    cache_parser = subparsers.add_parser("cache", help="Show or manage the response cache")
+    cache_parser.add_argument(
+        "--evict",
+        action="store_true",
+        help="Run LRU eviction to bring cache within size limit",
+    )
+    cache_parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="as_json",
+        help="Output stats as JSON",
+    )
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -80,6 +127,12 @@ def cli() -> None:
         asyncio.run(_restart_pipeline(uuid.UUID(args.pipeline_run_id)))
     elif args.command == "status":
         asyncio.run(_show_status(args.limit))
+    elif args.command == "inspect":
+        _inspect_run(args.run_id, args.step)
+    elif args.command == "stats":
+        asyncio.run(_show_stats(args.days, args.as_json))
+    elif args.command == "cache":
+        _show_cache(evict=args.evict, as_json=args.as_json)
 
 
 async def _run_pipeline(pipeline_name: str) -> None:
@@ -182,6 +235,132 @@ async def _show_status(limit: int) -> None:
     except Exception as e:
         print(f"Could not fetch pipeline status: {e}")
         print("Ensure PostgreSQL is running and database is initialised.")
+
+
+async def _show_stats(days: int, as_json: bool = False) -> None:
+    """Show aggregate pipeline statistics over a time window."""
+    try:
+        from kairos.tools.pipeline_stats import get_pipeline_stats
+        import json
+
+        stats = await get_pipeline_stats(days=days)
+
+        if as_json:
+            print(json.dumps(stats.to_dict(), indent=2))
+        else:
+            print(stats.summary())
+    except Exception as e:
+        print(f"Could not fetch pipeline stats: {e}")
+        print("Ensure PostgreSQL is running and database is initialised.")
+
+
+def _inspect_run(run_id: str | None, step_number: int | None) -> None:
+    """Inspect step artifacts for a pipeline run.
+
+    If no run_id given, shows the latest run.
+    If --step N given, shows only that step's artifact in full.
+    Otherwise, shows the run summary.
+    """
+    import json
+    from pathlib import Path
+
+    runs_dir = Path(__file__).resolve().parent.parent.parent / "runs"
+
+    if not runs_dir.exists():
+        print("No runs directory found. Run a pipeline first.")
+        sys.exit(1)
+
+    if run_id is None:
+        # Find the latest run by modification time
+        run_dirs = sorted(runs_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
+        if not run_dirs:
+            print("No runs found.")
+            sys.exit(1)
+        run_dir = run_dirs[0]
+        print(f"Latest run: {run_dir.name}\n")
+    else:
+        run_dir = runs_dir / run_id
+        if not run_dir.exists():
+            # Try partial match
+            matches = [d for d in runs_dir.iterdir() if d.is_dir() and run_id in d.name]
+            if len(matches) == 1:
+                run_dir = matches[0]
+            elif len(matches) > 1:
+                print(f"Ambiguous run ID '{run_id}'. Matches:")
+                for m in matches:
+                    print(f"  {m.name}")
+                sys.exit(1)
+            else:
+                print(f"Run '{run_id}' not found in {runs_dir}")
+                sys.exit(1)
+
+    if step_number is not None:
+        # Show a specific step's artifact
+        step_files = sorted(run_dir.glob(f"{step_number:02d}_*.json"))
+        if not step_files:
+            print(f"No artifact found for step {step_number} in {run_dir.name}")
+            print(f"Available files: {', '.join(f.name for f in sorted(run_dir.iterdir()))}")
+            sys.exit(1)
+        for sf in step_files:
+            data = json.loads(sf.read_text(encoding="utf-8"))
+            print(json.dumps(data, indent=2))
+        return
+
+    # Show run summary + list of steps
+    summary_file = run_dir / "run_summary.json"
+    if summary_file.exists():
+        summary = json.loads(summary_file.read_text(encoding="utf-8"))
+        print(f"Run:      {summary.get('pipeline_run_id', 'N/A')}")
+        print(f"Pipeline: {summary.get('pipeline', 'N/A')}")
+        print(f"Status:   {summary.get('final_status', 'N/A')}")
+        print(f"Duration: {summary.get('total_duration_ms', 0)}ms")
+        print(f"Concept:  {summary.get('concept_title', 'N/A')}")
+        print(f"Video:    {summary.get('final_video_path', 'N/A')}")
+        print(f"Cost:     ${summary.get('total_cost_usd', 0.0):.4f}")
+        print()
+        if summary.get("steps"):
+            print("Steps:")
+            for step in summary["steps"]:
+                icon = "✓" if step["status"] == "success" else "✗"
+                print(f"  {icon} [{step['step_number']}] {step['step']:<25} {step['duration_ms']:>8}ms  ({step['status']})")
+        if summary.get("errors"):
+            print("\nErrors:")
+            for err in summary["errors"]:
+                print(f"  → {err}")
+    else:
+        print(f"No run summary found. Available artifacts:")
+
+    # List all files
+    print(f"\nArtifact files in {run_dir.name}/:")
+    for f in sorted(run_dir.iterdir()):
+        size = f.stat().st_size
+        print(f"  {f.name:<40} {size:>8} bytes")
+    print(f"\nTo view a step: pipeline inspect {run_dir.name} --step <N>")
+
+
+def _show_cache(*, evict: bool = False, as_json: bool = False) -> None:
+    """Show cache statistics and optionally run eviction."""
+    from kairos.services.response_cache import ResponseCache
+
+    stats = ResponseCache.cache_stats()
+
+    if evict:
+        # Create a temporary instance just for eviction
+        cache = ResponseCache(run_id="__cli_evict__")
+        deleted = cache.evict_if_needed()
+        stats["evicted_files"] = deleted
+        # Refresh stats after eviction
+        stats = {**ResponseCache.cache_stats(), "evicted_files": deleted}
+
+    if as_json:
+        print(json.dumps(stats, indent=2))
+    else:
+        print(f"Global cache: {stats['total_size_mb']:.1f} MB  ({stats['file_count']} files)")
+        print(f"  LLM responses:     {stats['llm_count']}")
+        print(f"  Sandbox results:   {stats['sandbox_count']}")
+        print(f"  Sandbox outputs:   {stats['sandbox_output_count']}")
+        if evict:
+            print(f"  Evicted:           {stats['evicted_files']} files")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,15 @@
+﻿---
+version: 1
+description: "Shared concept details template"
+---
+## Concept Details
+- Title: {{ title }}
+- Visual Brief: {{ visual_brief }}
+- Body Count (initial): {{ body_count_initial }}
+- Body Count (max): {{ body_count_max }}
+- Interaction Type: {{ interaction_type }}
+- Colour Palette: {{ colour_palette }}
+- Background Colour: {{ background_colour }}
+- Special Effects: {{ special_effects }}
+- Target Duration: {{ target_duration_sec }} seconds
+- Seed: {{ seed }}

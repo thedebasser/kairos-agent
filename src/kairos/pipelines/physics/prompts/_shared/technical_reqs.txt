@@ -1,0 +1,11 @@
+﻿---
+version: 1
+description: "Shared technical requirements"
+---
+## Technical Requirements
+1. Output: `/workspace/output/simulation.mp4` (1080x1920, 30 FPS, {{ target_duration_sec }}s)
+2. Headless: `os.environ['SDL_VIDEODRIVER'] = 'dummy'` — NO `pygame.display.set_mode()` or `flip()`
+3. Capture: `pygame.image.tostring(screen, 'RGB')` piped to ffmpeg subprocess
+4. Physics: `space.step(1/60)` called TWICE per frame (2 substeps = 60Hz physics)
+5. Stdout: print `PAYOFF_TIMESTAMP=<seconds>` and `PEAK_BODY_COUNT=<n>`
+6. Imports: ONLY pygame, pymunk, pymunk.pygame_util, subprocess, random, math, os, sys, time

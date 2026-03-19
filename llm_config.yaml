@@ -26,11 +26,29 @@
 # The pipeline will skip all local-model attempts and go straight to cloud,
 # but will still record every cloud response as training data for later use.
 
-use_local_llms: false
+use_local_llms: true
 
 # Always store training data from cloud calls, even when local is disabled.
 # (This is the whole point — accumulate data for future fine-tuning.)
 always_store_training_data: true
+
+# ─── Extended Thinking (Chain-of-Thought) ────────────────────────────────────
+#
+# Enables Anthropic's extended thinking on Claude models.
+# The model's internal reasoning is captured and logged so you can see
+# exactly how it works through problems, writes configs, etc.
+#
+# budget_tokens: max tokens the model can spend on thinking (min 1024).
+#                Higher = deeper reasoning but more cost/latency.
+#                10 000 is a good default for config generation tasks.
+# enabled:       set to false to disable thinking without removing config.
+#
+# NOTE: Only applies to Anthropic Claude models. Ollama/local models
+#       ignore this setting automatically.
+
+thinking:
+  enabled: true
+  budget_tokens: 10000
 
 # ─── Ollama (local model server) ────────────────────────────────────────────
 ollama:
@@ -79,14 +97,15 @@ steps:
     agent: idea_agent
     description: >
       Generates a full ConceptBrief (title, hook, visual brief, physics params)
-      from the selected category. Creative writing — cloud-only for quality.
-    local_model: null                         # no local model — creative task needs cloud
+      from the selected category. Local model handles creative structured output;
+      falls back to cloud if quality gate fails.
+    local_model: ollama/qwen3.5:9b
     cloud_model: claude-sonnet-4-6
-    litellm_alias_local: null
+    litellm_alias_local: concept-developer-local
     litellm_alias_cloud: concept-developer
-    call_pattern: direct
-    quality_gate: "N/A — cloud only"
-    fallback_note: "Pipeline fails if concept generation fails after retries"
+    call_pattern: quality_fallback
+    quality_gate: "ConceptBrief must have title, visual_brief >50 chars, 5+ hex colours, hook_text ≤6 words"
+    fallback_note: "Cloud output is recorded as training data for future local model improvement"
 
   # ── Simulation Agent ────────────────────────────────────────────────────
 
@@ -154,13 +173,162 @@ steps:
     description: >
       Tier 2 AI-assisted validation — inspects rendered frames for visual quality.
       Uses Moondream2 vision model locally. NOT YET IMPLEMENTED (stubbed).
-    local_model: ollama/moondream2
+    local_model: ollama/moondream:latest
     cloud_model: null                         # no cloud equivalent planned yet
     litellm_alias_local: frame-inspector
     litellm_alias_cloud: null
     call_pattern: direct
     quality_gate: "N/A — not yet implemented"
     fallback_note: "Tier 2 validation is skipped if model unavailable"
+
+  # ── Video Review Agent ──────────────────────────────────────────────────
+
+  video_reviewer:
+    agent: video_review_agent
+    description: >
+      Reviews rendered video clips for visual/physics issues using a
+      vision-language model. Checks: broken physics, bad framing, camera
+      issues, caption placement, objects flying off screen, etc.
+      Default: Qwen3-VL-8B-Instruct (~16 GB FP16).
+    local_model: ollama/qwen3-vl:8b
+    cloud_model: null                         # no cloud equivalent — local VLM only
+    litellm_alias_local: video-reviewer-default
+    litellm_alias_cloud: null
+    call_pattern: direct
+    quality_gate: "Structured review result with pass/fail + issue list"
+    fallback_note: >
+      If reviewer is unavailable, video passes through to audio review
+      with a warning logged.
+    # Optional pre-check tooling (DOVER, aesthetic scoring)
+    # Set enabled: true to run lightweight visual quality checks before VLM
+    pre_checks:
+      dover:
+        enabled: false
+        threshold_technical: 0.4              # auto-reject below this
+        threshold_aesthetic: 0.3
+      aesthetic_predictor:
+        enabled: false
+        threshold: 3.0                        # LAION 1-10 scale
+
+  video_reviewer_escalation:
+    agent: video_review_agent
+    description: >
+      Heavier vision-language model for re-reviewing clips flagged as
+      uncertain/borderline by the 8B default. MoE: 30B total, 3B active.
+      Use lower frame sampling rate and reduced resolution.
+    local_model: ollama/qwen3-vl:30b-a3b
+    cloud_model: null
+    litellm_alias_local: video-reviewer-escalation
+    litellm_alias_cloud: null
+    call_pattern: direct
+    quality_gate: "N/A — escalation model, result is final"
+    fallback_note: "If escalation model unavailable, default model result stands"
+    # Escalation thresholds
+    escalation:
+      confidence_threshold: 0.7               # escalate if default confidence < this
+      max_frame_rate: 0.5                     # FPS for frame sampling (reduce for 30B)
+      max_resolution: 720                     # max height pixels for 30B model
+
+  # ── Audio Review Agent ──────────────────────────────────────────────────
+
+  audio_reviewer:
+    agent: audio_review_agent
+    description: >
+      Reviews final composed audio (music + TTS + SFX mix) using an
+      omni-modal LLM. Checks: artifacts, noise, TTS accuracy, vibe match,
+      volume levels. Default: Qwen3.5-9B.
+      FFmpeg ebur128 loudness analysis always runs regardless of model choice.
+      NOTE: True omni audio input requires qwen3.5-omni when available on Ollama.
+      Until then, audio review relies primarily on FFmpeg loudness analysis.
+    local_model: ollama/qwen3.5:9b
+    cloud_model: null
+    litellm_alias_local: audio-reviewer-default
+    litellm_alias_cloud: null
+    call_pattern: direct
+    quality_gate: "Structured review result + LUFS loudness within [-16, -14]"
+    fallback_note: >
+      If reviewer is unavailable, audio passes through with FFmpeg-only
+      loudness check.
+    # FFmpeg loudness thresholds (always enforced)
+    loudness:
+      target_lufs_min: -16.0
+      target_lufs_max: -14.0
+      true_peak_max_dbtp: -1.0
+    # Optional DNSMOS P.835 speech quality check
+    dnsmos:
+      enabled: false
+      threshold_ovrl: 3.0                     # MOS overall quality threshold (1-5)
+
+  audio_reviewer_specialist:
+    agent: audio_review_agent
+    description: >
+      Specialist stack alternative: Whisper large-v3 (TTS transcript WER),
+      BEATs (unexpected sound detection), FFmpeg ebur128 (loudness).
+      More granular, deterministic outputs but no holistic vibe judgment.
+    stack: specialist                         # not a single model — multi-tool stack
+    local_model: null                         # uses dedicated tool models
+    cloud_model: null
+    litellm_alias_local: null
+    litellm_alias_cloud: null
+    call_pattern: direct
+    specialist_tools:
+      whisper:
+        model: faster-whisper-large-v3
+        device: cuda
+        compute_type: int8                    # ~6-10 GB VRAM
+      beats:
+        model: BEATs_iter3_plus_AS2M         # ~1-2 GB
+        device: cuda
+      ffmpeg_ebur128:
+        enabled: true                         # always enabled
+
+  audio_reviewer_escalation:
+    agent: audio_review_agent
+    description: >
+      Heavier model for audio review escalation. Qwen3.5-35B-A3B
+      (MoE, 35B total, 3B active). Tight fit on RTX 3090 at Q4_K_M.
+      NOTE: True omni audio input requires qwen3.5-omni when available.
+    local_model: ollama/qwen3.5:35b-a3b
+    cloud_model: null
+    litellm_alias_local: audio-reviewer-escalation
+    litellm_alias_cloud: null
+    call_pattern: direct
+    quality_gate: "N/A — escalation model, result is final"
+    fallback_note: "If unavailable, default omni model result stands"
+
+  # ── Blender Coding (Simulation Code Generation for Blender pipelines) ───
+
+  blender_code_generation:
+    agent: simulation_agent
+    description: >
+      Generates/iterates Blender simulation code (Python bpy scripts).
+      Applies to marble and domino pipelines. Toggle 'enabled' to false
+      to use code-only mode (no LLM, manual scripts only).
+    enabled: true                             # set false for code-only mode (no LLM)
+    local_model: ollama/qwen3.5:27b
+    cloud_model: claude-sonnet-4-6
+    litellm_alias_local: blender-coder-default
+    litellm_alias_cloud: simulation-first-pass
+    call_pattern: quality_fallback
+    quality_gate: >
+      Code must contain 'bpy', be valid Python, and be >500 chars.
+    fallback_note: >
+      Cloud output is recorded as training data. If both fail, pipeline
+      errors out.
+    # Alternative models (switch via litellm_alias_local)
+    alternatives:
+      option_2:
+        model: ollama/devstral-small:24b
+        alias: blender-coder-option2
+        notes: "Devstral Small 2 24B — purpose-built for agentic coding (68% SWE-bench)"
+      option_3:
+        model: ollama/qwen3-coder:30b-a3b
+        alias: blender-coder-option3
+        notes: "Qwen3-Coder-30B-A3B — MoE code specialist, faster iteration"
+      fallback:
+        model: ollama/qwen2.5-coder:32b
+        alias: blender-coder-fallback
+        notes: "Qwen2.5-Coder-32B — strong function-level coding fallback"
 
 
 # =============================================================================
@@ -175,6 +343,8 @@ steps:
 #  ├──────────────────────────────────────────────────────────────────────────┤
 #  │  SIMULATION AGENT                                                       │
 #  │  4. Code Generation ──────── cloud only: Claude Sonnet                  │
+#  │     4b. Blender Code Gen ─── local: Qwen3.5-27B → cloud: Claude Sonnet │
+#  │         (quality_fallback, on/off toggle, marble + domino pipelines)    │
 #  │  5. Param Adjustment ─────── local: Mistral 7B → cloud: Claude Sonnet   │
 #  │     (quality_fallback with learning loop)                               │
 #  ├──────────────────────────────────────────────────────────────────────────┤
@@ -184,10 +354,28 @@ steps:
 #  │  8. Music Selector ───────── pure programmatic (no LLM)                 │
 #  │  9. FFmpeg Compositor ────── pure programmatic (no LLM)                 │
 #  ├──────────────────────────────────────────────────────────────────────────┤
+#  │  VIDEO REVIEW AGENT                                                     │
+#  │  10. Video Reviewer ──────── local: Qwen3-VL-8B (VLM)                  │
+#  │  11. Escalation Reviewer ─── local: Qwen3-VL-30B-A3B (if uncertain)    │
+#  │  12. Pre-checks (optional) ─ DOVER + LAION aesthetic (CPU/CLIP)         │
+#  ├──────────────────────────────────────────────────────────────────────────┤
+#  │  AUDIO REVIEW AGENT                                                     │
+#  │  13. Audio Reviewer ──────── local: Qwen3.5-9B + FFmpeg ebur128         │
+#  │  14. Specialist stack ────── Whisper + BEATs + FFmpeg (alternative)     │
+#  │  15. Escalation Reviewer ─── local: Qwen3.5-35B-A3B (if needed)        │
+#  │  16. FFmpeg Loudness ─────── always runs (CPU, LUFS/dBTP)              │
+#  ├──────────────────────────────────────────────────────────────────────────┤
 #  │  VALIDATION                                                             │
-#  │  10. Tier 1 ──────────────── pure FFprobe (no LLM)                      │
-#  │  11. Tier 2 (planned) ────── local: Moondream2 (not yet implemented)    │
+#  │  17. Tier 1 ──────────────── pure FFprobe (no LLM)                      │
+#  │  18. Tier 2 (planned) ────── local: Moondream2 (not yet implemented)    │
+#  ├──────────────────────────────────────────────────────────────────────────┤
+#  │  HUMAN REVIEW                                                           │
+#  │  19. Dashboard/CLI ───────── manual approve/reject/rework               │
 #  └──────────────────────────────────────────────────────────────────────────┘
+#
+#  PIPELINE FLOW:
+#    Idea Agent → Simulation Agent → Video Editor Agent
+#      → Video Review → Audio Review → Human Review → Publish
 #
 # TRAINING DATA: Every cloud call is logged to Postgres (agent_runs table +
 # training_examples table) AND to knowledge/cloud_learnings/ as JSON files.

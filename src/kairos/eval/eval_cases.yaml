@@ -1,0 +1,314 @@
+# Kairos Eval — Curated Test Cases
+#
+# Each entry defines a ConceptBrief (or the fields to construct one) plus
+# the expected validation outcomes.  The eval harness loads this file with
+# ``EvalCase.load_suite()`` and runs the pipeline in eval mode.
+#
+# Finding 6.2: "No Eval Dataset or Regression Testing Framework"
+
+cases:
+
+  # ── Ball Pit ──────────────────────────────────────────────────────────
+
+  - id: "bp-overflow-01"
+    category: "ball_pit"
+    title: "Rainbow Ball Pit Overflow"
+    visual_brief: >
+      Hundreds of colourful balls drop into a tall glass container,
+      bouncing and piling up until the container overflows in a
+      satisfying cascade of colour.
+    hook_text: "Watch it overflow"
+    body_count_initial: 5
+    body_count_max: 300
+    interaction_type: "bounce_accumulate"
+    colour_palette: ["#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4", "#FFEAA7"]
+    background_colour: "#1a1a2e"
+    seed: 42
+    expected:
+      validation_passes: true
+      min_checks_passed: 6
+      must_pass_checks:
+        - "has_video_stream"
+        - "resolution_check"
+        - "duration_range"
+        - "fps_check"
+
+  - id: "bp-neon-02"
+    category: "ball_pit"
+    title: "Neon Ball Drop Party"
+    visual_brief: >
+      Glowing neon balls rain from the sky into a deep pit,
+      each bounce sending out a tiny pulse of light. Balls accumulate
+      rapidly creating a dense, vibrant sea of colour.
+    hook_text: "It never stops"
+    body_count_initial: 10
+    body_count_max: 250
+    interaction_type: "bounce_accumulate"
+    colour_palette: ["#FF00FF", "#00FFFF", "#FF6600", "#33FF33", "#FFFF00"]
+    background_colour: "#0a0a0a"
+    seed: 101
+    expected:
+      validation_passes: true
+      min_checks_passed: 6
+      must_pass_checks:
+        - "has_video_stream"
+        - "duration_range"
+
+  - id: "bp-tiny-03"
+    category: "ball_pit"
+    title: "Tiny Micro Ball Fountain"
+    visual_brief: >
+      Thousands of tiny micro-balls erupt from a central fountain,
+      arcing outward and collecting in a growing mound that slowly
+      spreads across the screen.
+    hook_text: "So many balls"
+    body_count_initial: 20
+    body_count_max: 500
+    interaction_type: "bounce_accumulate"
+    colour_palette: ["#E8D5B7", "#F2A65A", "#F58F29", "#D45113", "#772F1A"]
+    background_colour: "#1a1a2e"
+    seed: 202
+    expected:
+      validation_passes: true
+      min_checks_passed: 5
+      must_pass_checks:
+        - "has_video_stream"
+
+  # ── Marble Funnel ─────────────────────────────────────────────────────
+
+  - id: "mf-spiral-01"
+    category: "marble_funnel"
+    title: "Spiral Marble Run"
+    visual_brief: >
+      Marbles are dropped from the top of a spiral funnel track,
+      accelerating as they descend through increasingly tight curves
+      before collecting in a mesmerizing swirl at the bottom.
+    hook_text: "So satisfying to watch"
+    body_count_initial: 3
+    body_count_max: 200
+    interaction_type: "roll_collect"
+    colour_palette: ["#E74C3C", "#3498DB", "#2ECC71", "#F39C12", "#9B59B6"]
+    background_colour: "#0d1117"
+    special_effects: ["trails"]
+    seed: 123
+    expected:
+      validation_passes: true
+      min_checks_passed: 6
+      must_pass_checks:
+        - "has_video_stream"
+        - "resolution_check"
+        - "duration_range"
+
+  - id: "mf-cascade-02"
+    category: "marble_funnel"
+    title: "Multi-Level Marble Cascade"
+    visual_brief: >
+      Marbles bounce down a series of tilted platforms, splitting
+      into multiple streams at each level before converging at a
+      single collection point.
+    hook_text: "Watch them split"
+    body_count_initial: 5
+    body_count_max: 150
+    interaction_type: "roll_collect"
+    colour_palette: ["#1ABC9C", "#3498DB", "#E74C3C", "#F1C40F", "#8E44AD"]
+    background_colour: "#0d1117"
+    seed: 300
+    expected:
+      validation_passes: true
+      min_checks_passed: 5
+      must_pass_checks:
+        - "has_video_stream"
+        - "duration_range"
+
+  - id: "mf-vortex-03"
+    category: "marble_funnel"
+    title: "Marble Vortex Whirlpool"
+    visual_brief: >
+      Marbles orbit around a central drain in ever-tightening circles,
+      creating a mesmerising vortex effect before being swallowed by
+      the centre and launched upward to restart the cycle.
+    hook_text: "The vortex pulls them"
+    body_count_initial: 8
+    body_count_max: 100
+    interaction_type: "roll_collect"
+    colour_palette: ["#00CEC9", "#6C5CE7", "#FD79A8", "#FDCB6E", "#E17055"]
+    background_colour: "#0d1117"
+    seed: 404
+    expected:
+      validation_passes: true
+      min_checks_passed: 5
+      must_pass_checks:
+        - "has_video_stream"
+
+  # ── Domino Chain ──────────────────────────────────────────────────────
+
+  - id: "dc-spiral-01"
+    category: "domino_chain"
+    title: "Colour-Coded Domino Spiral"
+    visual_brief: >
+      A massive spiral of colour-coded dominoes is triggered from
+      the centre, creating an expanding wave of falling dominoes
+      that reveals a rainbow pattern as they topple outward.
+    hook_text: "Wait for the spiral"
+    body_count_initial: 200
+    body_count_max: 500
+    interaction_type: "topple_cascade"
+    colour_palette: ["#FF6B6B", "#FFD93D", "#6BCB77", "#4D96FF", "#9B59B6"]
+    background_colour: "#16213e"
+    seed: 256
+    expected:
+      validation_passes: true
+      min_checks_passed: 6
+      must_pass_checks:
+        - "has_video_stream"
+        - "resolution_check"
+        - "duration_range"
+        - "fps_check"
+
+  - id: "dc-zigzag-02"
+    category: "domino_chain"
+    title: "Zigzag Domino Express"
+    visual_brief: >
+      A zigzagging line of dominoes weaves across the screen,
+      each turn revealing a new colour segment. The topple
+      races forward, leaving a flat gradient pattern behind.
+    hook_text: "Follow the zigzag"
+    body_count_initial: 150
+    body_count_max: 400
+    interaction_type: "topple_cascade"
+    colour_palette: ["#FF9F43", "#EE5A24", "#0ABDE3", "#10AC84", "#341F97"]
+    background_colour: "#16213e"
+    seed: 350
+    expected:
+      validation_passes: true
+      min_checks_passed: 5
+      must_pass_checks:
+        - "has_video_stream"
+        - "duration_range"
+
+  - id: "dc-branch-03"
+    category: "domino_chain"
+    title: "Branching Domino Tree"
+    visual_brief: >
+      A single domino triggers a chain that splits at Y-junctions,
+      branching outward like a fractal tree until hundreds of
+      parallel chains topple simultaneously.
+    hook_text: "One starts them all"
+    body_count_initial: 100
+    body_count_max: 600
+    interaction_type: "topple_cascade"
+    colour_palette: ["#55E6C1", "#58B19F", "#1B9CFC", "#F8EFBA", "#FC427B"]
+    background_colour: "#16213e"
+    seed: 450
+    expected:
+      validation_passes: true
+      min_checks_passed: 5
+      must_pass_checks:
+        - "has_video_stream"
+
+  # ── Destruction ───────────────────────────────────────────────────────
+
+  - id: "ds-tower-01"
+    category: "destruction"
+    title: "Tower of Blocks Wrecking Ball"
+    visual_brief: >
+      A carefully stacked tower of colourful blocks stands tall.
+      A heavy wrecking ball swings in and smashes through the tower,
+      sending debris flying in a spectacular explosion of colour.
+    hook_text: "This tower is doomed"
+    body_count_initial: 150
+    body_count_max: 400
+    interaction_type: "impact_scatter"
+    colour_palette: ["#FF4757", "#2ED573", "#1E90FF", "#FFA502", "#A55EEA"]
+    background_colour: "#1a1a2e"
+    special_effects: ["particles"]
+    seed: 512
+    expected:
+      validation_passes: true
+      min_checks_passed: 6
+      must_pass_checks:
+        - "has_video_stream"
+        - "resolution_check"
+        - "duration_range"
+
+  - id: "ds-wall-02"
+    category: "destruction"
+    title: "Brick Wall Demolition"
+    visual_brief: >
+      A solid brick wall of rainbow-coloured blocks stands against a
+      dark background. A barrage of heavy spheres slam into the wall
+      from the right, sending bricks scattering in slow-mo.
+    hook_text: "Smash the wall"
+    body_count_initial: 200
+    body_count_max: 350
+    interaction_type: "impact_scatter"
+    colour_palette: ["#C0392B", "#E67E22", "#F1C40F", "#27AE60", "#2980B9"]
+    background_colour: "#1a1a2e"
+    seed: 600
+    expected:
+      validation_passes: true
+      min_checks_passed: 5
+      must_pass_checks:
+        - "has_video_stream"
+        - "duration_range"
+
+  - id: "ds-pyramid-03"
+    category: "destruction"
+    title: "Pyramid Avalanche"
+    visual_brief: >
+      A perfect pyramid of cubes sits centre-screen. A single ball
+      rolls down from the apex, dislodging blocks in a growing
+      avalanche that swallows the entire structure.
+    hook_text: "One ball starts it"
+    body_count_initial: 100
+    body_count_max: 250
+    interaction_type: "impact_scatter"
+    colour_palette: ["#D4AC0D", "#F5B041", "#EB984E", "#DC7633", "#BA4A00"]
+    background_colour: "#1a1a2e"
+    seed: 700
+    expected:
+      validation_passes: true
+      min_checks_passed: 5
+      must_pass_checks:
+        - "has_video_stream"
+
+  # ── Edge cases (intentionally tricky) ─────────────────────────────────
+
+  - id: "edge-minimal-01"
+    category: "ball_pit"
+    title: "Single Ball Bounce"
+    visual_brief: >
+      A single ball drops and bounces in a perfectly still room.
+      Maximum simplicity — tests the minimal physics simulation path.
+    hook_text: "Just one ball"
+    body_count_initial: 1
+    body_count_max: 1
+    interaction_type: "bounce_accumulate"
+    colour_palette: ["#FFFFFF"]
+    background_colour: "#000000"
+    seed: 1
+    expected:
+      validation_passes: true
+      min_checks_passed: 4
+      must_pass_checks:
+        - "has_video_stream"
+        - "duration_range"
+
+  - id: "edge-maxbodies-02"
+    category: "destruction"
+    title: "Maximum Body Stress Test"
+    visual_brief: >
+      Hundreds of tiny cubes are stacked 20 layers high. A massive
+      sphere crashes through, testing the engine at maximum body count.
+    hook_text: "Can it handle this?"
+    body_count_initial: 300
+    body_count_max: 800
+    interaction_type: "impact_scatter"
+    colour_palette: ["#FF0000", "#00FF00", "#0000FF"]
+    background_colour: "#1a1a2e"
+    seed: 999
+    expected:
+      validation_passes: true
+      min_checks_passed: 4
+      must_pass_checks:
+        - "has_video_stream"

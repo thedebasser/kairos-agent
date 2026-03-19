@@ -1,0 +1,36 @@
+﻿---
+version: 1
+description: "Simulation config user prompt"
+---
+## Simulation Config Request
+
+### Concept
+**Title:** {{ title }}
+**Category:** {{ category }}
+**Visual Brief:** {{ visual_brief }}
+
+### Requirements
+- Initial body count: {{ body_count_initial }}
+- Maximum body count: {{ body_count_max }}
+- Interaction type: {{ interaction_type }}
+- Target duration: {{ target_duration_sec }} seconds
+- Random seed: {{ seed }}
+
+### Colour Palette
+Background: {{ background_colour }}
+Object colours: {{ colour_palette }}
+
+### Special Effects
+{{ special_effects }}
+
+### Config Schema
+The JSON config must match this schema. Fields with defaults can be omitted.
+Physics parameters (elasticity, friction, mass, substeps) are template-enforced
+and included for reference only — focus on creative parameters.
+
+```json
+{{ config_schema }}
+```
+
+Generate the config JSON that best realises the concept brief above.
+Use the full colour palette and fill the visible canvas with objects.

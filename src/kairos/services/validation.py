@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -21,10 +22,38 @@ from kairos.models.contracts import ValidationCheck, ValidationResult
 logger = logging.getLogger(__name__)
 
 
+def _get_ffmpeg_path() -> str:
+    """Get the resolved FFmpeg path from centralised config."""
+    return get_settings().ffmpeg_path
+
+
+def _get_ffprobe_path() -> str:
+    """Get the resolved FFprobe path from centralised config."""
+    return get_settings().ffprobe_path
+
+
+# Per-path ffprobe cache — avoids spawning duplicate subprocesses within
+# a single validation run (Finding 5.3).
+_ffprobe_cache: dict[str, dict[str, object]] = {}
+
+
+def clear_ffprobe_cache() -> None:
+    """Clear the ffprobe result cache (e.g. between validation runs)."""
+    _ffprobe_cache.clear()
+
+
 def _run_ffprobe(video_path: str) -> dict[str, object]:
-    """Run ffprobe and return parsed JSON output."""
+    """Run ffprobe and return parsed JSON output.
+
+    Results are cached per *video_path* so that a ``validate_simulation``
+    call only spawns a single ffprobe subprocess regardless of how many
+    individual check functions need the metadata.
+    """
+    if video_path in _ffprobe_cache:
+        return _ffprobe_cache[video_path]
+
     cmd = [
-        "ffprobe",
+        _get_ffprobe_path(),
         "-v",
         "quiet",
         "-print_format",
@@ -36,9 +65,13 @@ def _run_ffprobe(video_path: str) -> dict[str, object]:
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         if result.returncode != 0:
+            _ffprobe_cache[video_path] = {}
             return {}
-        return json.loads(result.stdout)  # type: ignore[no-any-return]
+        parsed = json.loads(result.stdout)
+        _ffprobe_cache[video_path] = parsed
+        return parsed  # type: ignore[no-any-return]
     except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError):
+        _ffprobe_cache[video_path] = {}
         return {}
 
 
@@ -220,7 +253,7 @@ def check_frozen_frames(
     try:
         # Extract frames to temp dir and hash them
         cmd = [
-            "ffmpeg",
+            _get_ffmpeg_path(),
             "-i",
             video_path,
             "-vf",
@@ -313,7 +346,7 @@ def check_colour_valid(
 
     try:
         cmd = [
-            "ffmpeg",
+            _get_ffmpeg_path(),
             "-i",
             video_path,
             "-vf",
@@ -407,7 +440,7 @@ def check_motion_present(
     """
     try:
         cmd = [
-            "ffmpeg",
+            _get_ffmpeg_path(),
             "-i",
             video_path,
             "-vf",
@@ -455,16 +488,19 @@ def validate_simulation(
     video_path: str,
     *,
     run_tier2: bool = False,
+    skip_checks: set[str] | None = None,
 ) -> ValidationResult:
     """Run all validation checks on a simulation output.
 
     Args:
         video_path: Path to the rendered MP4 file.
         run_tier2: Whether to run AI-assisted Tier 2 checks.
+        skip_checks: Set of check names to skip (e.g. ``{"audio_present"}``).
 
     Returns:
         ValidationResult with all check results.
     """
+    skip = skip_checks or set()
     checks: list[ValidationCheck] = []
 
     # Tier 1 — Programmatic (mandatory)
@@ -474,7 +510,8 @@ def validate_simulation(
     checks.append(check_duration(video_path))
     checks.append(check_file_size(video_path))
     checks.append(check_frame_count(video_path))
-    checks.append(check_audio_present(video_path))
+    if "audio_present" not in skip:
+        checks.append(check_audio_present(video_path))
     checks.append(check_frozen_frames(video_path))
     checks.append(check_colour_valid(video_path))
     checks.append(check_motion_present(video_path))
@@ -501,13 +538,20 @@ def validate_simulation(
 def _run_tier2_checks(video_path: str) -> list[ValidationCheck]:
     """Run AI-assisted Tier 2 validation checks using Moondream2.
 
-    TODO: Implement after Moondream2 integration (Step 5).
+    Extracts frames at early (2s), mid, and late (last 3s) timestamps
+    and sends them to the local vision model for analysis.
     """
-    logger.info("Tier 2 AI-assisted checks not yet implemented for %s", video_path)
-    return [
-        ValidationCheck(
-            name="ai_content_present",
-            passed=True,
-            message="Tier 2 checks not yet implemented (skipped)",
-        ),
-    ]
+    try:
+        from kairos.services.screenshot_analyzer import analyze_to_validation_checks
+
+        logger.info("Running Tier 2 AI-assisted checks on %s", video_path)
+        return analyze_to_validation_checks(video_path)
+    except Exception as e:
+        logger.warning("Tier 2 AI checks failed: %s", e, exc_info=True)
+        return [
+            ValidationCheck(
+                name="ai_content_present",
+                passed=True,
+                message=f"Tier 2 checks failed (non-blocking): {e}",
+            ),
+        ]

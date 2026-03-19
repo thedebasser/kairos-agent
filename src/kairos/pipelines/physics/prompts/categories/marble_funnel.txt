@@ -1,0 +1,214 @@
+﻿---
+version: 1
+description: "Marble funnel category prompt"
+---
+## MANDATORY: Physics Parameters (Marble-Specific)
+Pymunk MULTIPLIES elasticity of both colliding shapes: marble(0.5) × ramp(0.3) = effective 0.15.
+- Marble radius: 10-20px | mass: 1.0-2.0 | elasticity: 0.5 | friction: 0.6
+- Ramp/wall elasticity: 0.3 | friction: 0.7 (both >= 0.5 for satisfying ROLLING)
+- space.damping = 0.99
+- space.iterations = 15
+- ALWAYS: `moment = pymunk.moment_for_circle(mass, 0, radius)` — NEVER guess moment
+- Max 200 bodies. Remove marbles that exit below screen (y > HEIGHT + 100).
+
+## MANDATORY: Energy Curve (4 phases — psychology-driven)
+Marble runs activate predictability (confirmed physics), Gestalt continuity (smooth
+flowing paths), and mirror neurons (the rolling/bouncing sensation).
+
+1. **Calm Intro (0-15s)**: First few marbles enter from top. Slow, mesmerising descent.
+   - PSYCHOLOGY: The seeking system engages — novel ramp configuration. The viewer's
+     brain asks: 'how will the marble navigate this path?' Each ramp transition
+     creates a micro-prediction → micro-confirmation → micro-dopamine hit.
+   - Gestalt continuity: the brain traces the ramp path as a single continuous line.
+   - Colour: cool tones (blues, greens). Individual marbles clearly trackable.
+
+2. **Building (15-40s)**: Spawn rate increases (3-4/sec). Paths fill with colour.
+   - PSYCHOLOGY: Pattern recognition intensifies as the brain tracks multiple marbles.
+     Rhythmic 'tink' sounds at ramp transitions create ASMR-style auditory entrainment.
+     Rainbow colour sequencing makes the accumulation readable as a visual narrative.
+   - Mirror neurons fire more intensely with more simultaneous rolling objects.
+   - Colour: warm colours introduced. The ramps become 'painted' with flowing colour.
+
+3. **Climax (40-55s)**: Maximum marble density. Screen alive with flowing colour.
+   - PSYCHOLOGY: The accumulation of marbles at the collection point creates Zeigarnik
+     tension — the container is filling, approaching overflow. If a climax EVENT exists
+     (funnel opens, marbles cascade into final basin), this elevates to Tier 1.
+   - Colour: peak saturation. Full rainbow visible across the ramp system.
+
+4. **Resolution (55-{{ target_duration_sec }}s)**: No new spawns. Last marbles settle.
+   - PSYCHOLOGY: The final marble reaching the collection point = completion reward.
+     All marbles at rest = 'just right' signal. The colour stratification in the
+     collection area tells the story of how the scene was built.
+   - The LAST marble rolling to a stop should be clearly visible.
+
+## Funnel/Ramp Construction
+Keep it SIMPLE: 3-5 zig-zag ramps using `pymunk.Segment`. Marbles descend naturally via gravity.
+```python
+# Zig-zag ramp pattern (marbles bounce left-right descending screen):
+static = space.static_body
+ramps = [
+    pymunk.Segment(static, (80, 300), (1000, 500), 5),    # Ramp 1: left→right
+    pymunk.Segment(static, (1000, 600), (80, 800), 5),    # Ramp 2: right→left
+    pymunk.Segment(static, (80, 900), (1000, 1100), 5),   # Ramp 3: left→right
+    pymunk.Segment(static, (1000, 1200), (80, 1400), 5),  # Ramp 4: right→left
+]
+for seg in ramps:
+    seg.elasticity = 0.3; seg.friction = 0.7; space.add(seg)
+
+# Funnel: two angled segments converging to center
+funnel_l = pymunk.Segment(static, (200, 1500), (WIDTH//2 - 30, 1650), 5)
+funnel_r = pymunk.Segment(static, (880, 1500), (WIDTH//2 + 30, 1650), 5)
+```
+
+## Drawing Functions (use these exactly)
+```python
+def draw_marble(surface, body, shape, color):
+    pos = (int(body.position.x), int(body.position.y))
+    r = int(shape.radius)
+    pygame.draw.circle(surface, color, pos, r)
+    hl = tuple(min(c + 60, 255) for c in color[:3])
+    pygame.draw.circle(surface, hl, (pos[0] - r//3, pos[1] - r//3), max(1, r//3))
+
+def draw_segment(surface, seg, color=(100, 100, 130), width=5):
+    a = (int(seg.a.x + seg.body.position.x), int(seg.a.y + seg.body.position.y))
+    b = (int(seg.b.x + seg.body.position.x), int(seg.b.y + seg.body.position.y))
+    pygame.draw.line(surface, color, a, b, width)
+```
+
+## VERIFIED WORKING EXAMPLE (marble funnel, simplified)
+Study this working code structure — your output MUST follow the same patterns:
+```python
+import pygame
+import pymunk
+import pymunk.pygame_util
+import subprocess
+import random
+import math
+import os
+
+pymunk.pygame_util.positive_y_is_up = False  # CRITICAL
+
+WIDTH, HEIGHT = 1080, 1920
+FPS = 30
+DURATION = 65
+TOTAL_FRAMES = FPS * DURATION
+SEED = 42
+random.seed(SEED)
+
+PALETTE = [(255,179,186),(255,223,186),(186,255,201),(186,225,255),(209,186,255)]
+BG = (26, 26, 46)
+
+os.environ['SDL_VIDEODRIVER'] = 'dummy'
+os.environ['SDL_AUDIODRIVER'] = 'dummy'
+pygame.init()
+screen = pygame.Surface((WIDTH, HEIGHT))
+
+space = pymunk.Space()
+space.gravity = (0, 900)
+space.damping = 0.99
+space.iterations = 15
+
+# Zig-zag ramps
+static = space.static_body
+ramp_data = [
+    ((80, 300), (1000, 500)),
+    ((1000, 600), (80, 800)),
+    ((80, 900), (1000, 1100)),
+    ((1000, 1200), (80, 1400)),
+]
+ramps = []
+for a, b in ramp_data:
+    seg = pymunk.Segment(static, a, b, 5)
+    seg.elasticity = 0.3; seg.friction = 0.7; space.add(seg)
+    ramps.append(seg)
+
+# Collection floor + walls
+cfloor = pymunk.Segment(static, (0, HEIGHT-100), (WIDTH, HEIGHT-100), 5)
+cfloor.elasticity = 0.3; cfloor.friction = 0.7; space.add(cfloor)
+ramps.append(cfloor)
+for pts in [((0,0),(0,HEIGHT)), ((WIDTH,0),(WIDTH,HEIGHT))]:
+    w = pymunk.Segment(static, pts[0], pts[1], 5)
+    w.elasticity = 0.3; w.friction = 0.5; space.add(w)
+    ramps.append(w)
+
+marbles = []
+
+def spawn_marble(x, y):
+    radius = random.uniform(10, 18)
+    mass = radius / 8.0
+    moment = pymunk.moment_for_circle(mass, 0, radius)
+    body = pymunk.Body(mass, moment)
+    body.position = (x, y)
+    shape = pymunk.Circle(body, radius)
+    shape.elasticity = 0.5; shape.friction = 0.6
+    space.add(body, shape)
+    marbles.append((body, shape, random.choice(PALETTE)))
+
+os.makedirs('/workspace/output', exist_ok=True)
+pipe = subprocess.Popen([
+    'ffmpeg', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb24',
+    '-s', f'{WIDTH}x{HEIGHT}', '-r', str(FPS), '-i', '-',
+    '-c:v', 'libx264', '-preset', 'fast', '-pix_fmt', 'yuv420p',
+    '-crf', '23', '/workspace/output/simulation.mp4'
+], stdin=subprocess.PIPE)
+
+peak_count = 0
+for frame in range(TOTAL_FRAMES):
+    t = frame / FPS
+    if t < 15:     rate = 1
+    elif t < 40:   rate = 3
+    elif t < 55:   rate = 5
+    else:          rate = 0
+    if rate > 0 and frame % max(1, FPS // rate) == 0 and len(marbles) < 200:
+        spawn_marble(random.uniform(200, WIDTH-200), 30)
+
+    space.step(1/60); space.step(1/60)
+
+    for entry in marbles[:]:
+        if entry[0].position.y > HEIGHT + 100:
+            space.remove(entry[0], entry[1]); marbles.remove(entry)
+    peak_count = max(peak_count, len(marbles))
+
+    screen.fill(BG)
+    for seg in ramps:
+        a = (int(seg.a.x+seg.body.position.x), int(seg.a.y+seg.body.position.y))
+        b = (int(seg.b.x+seg.body.position.x), int(seg.b.y+seg.body.position.y))
+        pygame.draw.line(screen, (100,100,130), a, b, 5)
+    for body, shape, color in marbles:
+        pos = (int(body.position.x), int(body.position.y))
+        r = int(shape.radius)
+        pygame.draw.circle(screen, color, pos, r)
+        hl = tuple(min(c+60,255) for c in color)
+        pygame.draw.circle(screen, hl, (pos[0]-r//3,pos[1]-r//3), max(1,r//3))
+
+    pipe.stdin.write(pygame.image.tostring(screen, 'RGB'))
+
+pipe.stdin.close(); pipe.wait()
+print(f"PAYOFF_TIMESTAMP=40.0")
+print(f"PEAK_BODY_COUNT={peak_count}")
+```
+
+## PSYCHOLOGY: Colour Design
+- Background: DARK (#1a1a2e deep navy-purple) — calm, mysterious, depth.
+  The deep navy creates a 'window into a scene' feeling on phone screens.
+- Marbles: Rainbow Pastel palette, sequenced by spawn order:
+  `marble_colour = PALETTE[spawn_index % len(PALETTE)]`
+  This makes the ramp system look like it's painting itself with colour as
+  marbles flow through — satisfying because colour encodes the passage of time.
+- Ramps: dim neutral colour (100, 100, 130) — structural, not competing for attention.
+  The ramps are the STAGE; the marbles are the STARS.
+- Collection area: as marbles accumulate, the colour layers become visible —
+  a geological stratification effect that tells the story of the simulation.
+- Highlight dot on each marble adds 3D roundness → mirror neuron tactile response.
+
+## Quality Checklist
+- [ ] `pymunk.pygame_util.positive_y_is_up = False` is set FIRST
+- [ ] `space.gravity = (0, 900)` and `space.iterations = 15`
+- [ ] All moments use `pymunk.moment_for_circle(mass, 0, radius)`
+- [ ] Ramps are visible segments with friction >= 0.5
+- [ ] Marbles roll (not slide) down ramps
+- [ ] Offscreen marbles removed each frame
+- [ ] Max body count stays under 200
+- [ ] Clear collection point where marbles accumulate
+- [ ] Rainbow colour sequence encodes spawn order
+- [ ] PAYOFF_TIMESTAMP and PEAK_BODY_COUNT printed to stdout

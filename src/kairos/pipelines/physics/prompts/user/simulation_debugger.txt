@@ -1,0 +1,16 @@
+﻿---
+version: 1
+description: "Legacy debugger user prompt"
+---
+## Iteration {{ iteration }} — Fix Required
+
+### Failed Validation Checks
+{{ failed_summary }}
+{{ static_issues }}
+
+### Current Code
+```python
+{{ code }}
+```
+
+Fix ALL issues and return the complete corrected script.

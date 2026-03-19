@@ -1,0 +1,9 @@
+﻿---
+version: 1
+description: "Concept developer user prompt"
+---
+Category: {{ category }}
+Description: {{ category_description }}
+Existing videos in this category: {{ existing_count }}
+
+Generate 3 ranked concepts. The top concept should be your strongest recommendation — prioritise FEASIBILITY (will it actually work as a Pymunk simulation?) over novelty.

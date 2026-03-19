@@ -1,0 +1,68 @@
+{
+  "version": "1.1",
+  "parameter_ranges": {
+    "marble_radius": {"min": 0.03, "max": 0.06, "default": 0.04},
+    "marble_mass": {"min": 0.5, "max": 2.0, "default": 1.0},
+    "marble_bounce": {"min": 0.2, "max": 0.6, "default": 0.4},
+    "marble_friction": {"min": 0.4, "max": 0.8, "default": 0.6},
+    "ramp_slope_deg": {"min": 15, "max": 45, "default": 25},
+    "ramp_width": {"min": 0.3, "max": 0.8, "default": 0.5},
+    "wall_height": {"min": 0.3, "max": 0.6, "default": 0.4,
+      "_comment": "Minimum 0.3 (3.0 units at scale) per containment formula H=2B^2*h_drop+2R. Raised to prevent marble escape."
+    },
+    "wall_thickness": {"min": 0.02, "max": 0.04, "default": 0.02,
+      "_comment": "0.02 pre-scale → 0.2 m at WORLD_SCALE=10 (4× tunnelling margin for Bullet)"
+    },
+    "funnel_top_width": {"min": 0.6, "max": 1.2, "default": 0.8},
+    "funnel_bottom_width": {"min": 0.48, "max": 0.8, "default": 0.5,
+      "_comment": "Min 0.48: exit aperture ≥ 6 × max marble diameter (0.06*2=0.12, 6×0.12=0.72 but pre-scale 0.48 → 4.8 scale units). build_funnel enforces ≥ 0.48*S automatically."
+    },
+    "funnel_height": {"min": 0.3, "max": 0.6, "default": 0.4},
+    "peg_radius": {"min": 0.01, "max": 0.025, "default": 0.015},
+    "peg_spacing": {"min": 0.096, "max": 0.18, "default": 0.12,
+      "_comment": "Research: 1.2-1.5× marble diameter. At marble_d=0.08: 0.096-0.12"
+    },
+    "peg_rows": {"min": 5, "max": 15, "default": 8},
+    "drop_height": {"min": 0.2, "max": 0.5, "default": 0.3},
+    "bin_count": {"min": 3, "max": 7, "default": 5},
+    "bin_width": {"min": 0.1, "max": 0.3, "default": 0.15},
+    "gate_open_frame": {"min": 10, "max": 60, "default": 30},
+    "substeps_per_frame": {"min": 10, "max": 30, "default": 20,
+      "_comment": "Research: 20 substeps eliminates small-marble tunnelling at WORLD_SCALE=10"
+    },
+    "solver_iterations": {"min": 10, "max": 40, "default": 20}
+  },
+  "colour_palettes": {
+    "rainbow": ["#FF0000", "#FF7F00", "#FFFF00", "#00FF00", "#0000FF", "#4B0082", "#9400D3"],
+    "pastel": ["#FFB3BA", "#FFDFBA", "#FFFFBA", "#BAFFC9", "#BAE1FF", "#E8BAFF"],
+    "neon": ["#FF1493", "#00FF7F", "#FFD700", "#00BFFF", "#FF4500", "#7FFF00"],
+    "ocean": ["#006994", "#40A4DF", "#8ED1FC", "#B8E6FF", "#004E6A"],
+    "sunset": ["#FF6B6B", "#FFA07A", "#FFD700", "#FF4500", "#DC143C", "#FF1493"],
+    "monochrome": ["#FFFFFF", "#CCCCCC", "#999999", "#666666", "#333333"]
+  },
+  "camera_offsets": {
+    "hero_angle": {"location": [2.5, -3.0, 2.0], "rotation_deg": [65, 0, 25]},
+    "tracking_angle": {"location": [3.0, -2.5, 1.8], "rotation_deg": [60, 0, 30]},
+    "top_down": {"location": [0.0, 0.0, 4.0], "rotation_deg": [0, 0, 0]}
+  },
+  "lighting_presets": {
+    "studio": {
+      "key_energy": 800,
+      "fill_energy": 300,
+      "rim_energy": 500,
+      "world_strength": 0.3
+    },
+    "dramatic": {
+      "key_energy": 1200,
+      "fill_energy": 100,
+      "rim_energy": 800,
+      "world_strength": 0.1
+    },
+    "soft": {
+      "key_energy": 500,
+      "fill_energy": 400,
+      "rim_energy": 300,
+      "world_strength": 0.5
+    }
+  }
+}

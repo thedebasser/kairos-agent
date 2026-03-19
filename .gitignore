@@ -59,6 +59,12 @@ htmlcov/
 *.log
 logs/
 
+# Run artifacts
+runs/
+
+# Run artifacts (per-run step outputs for review)
+runs/
+
 # Temporary files
 tmp/
 temp/
@@ -68,3 +74,58 @@ temp/
 
 # LangGraph checkpoints (managed by PostgreSQL)
 checkpoints/
+
+# ─── Internal / design docs ───────────────────────────────────────────────────
+# These are planning, review, or debugging notes not intended for public repo.
+docs/refactor-design-doc.md
+docs/ongoing-issues.md
+docs/kairos_ai_architecture_review.md
+docs/kairos_architectural_review.md
+docs/marble-run-redesign.md
+docs/research-brief-marble-pipeline.md
+docs/white-noise-diagnosis.md
+docs/implementation-document.md
+docs/kairos-agent-instructions-v2.md
+
+# ─── Loose dev / debug scripts at repo root ───────────────────────────────────
+cached_simulation.py
+extract_code.py
+replay_video_editor.py
+replay_with_cache.py
+run_ball_pit.py
+run_domino.py
+test_audio_chain.py
+test_sandbox_mp4.py
+
+# Pipeline run output dumps
+pipeline_run_output*.txt
+
+# Test artefacts
+test_frame.png
+test_gray.raw
+
+# ─── Audio diagnosis working files ────────────────────────────────────────────
+audio_diagnosis/
+
+# ─── Large binary assets ──────────────────────────────────────────────────────
+# HDRIs (.exr) and textures can be hundreds of MB — use Git LFS or store externally.
+assets/hdris/
+assets/textures/
+*.exr
+
+# SFX / audio samples
+assets/sfx/
+music/sound/
+*.wav
+*.flac
+*.ogg
+
+# ─── Blender binary files & test artefacts ────────────────────────────────────
+*.blend
+*.blend1
+blend/scripts/test_config.json
+blend/scripts/test_result.json
+
+# ─── Auto-generated knowledge / learning files ────────────────────────────────
+# These are written at runtime by the learning loop — not source-controlled.
+knowledge/cloud_learnings/

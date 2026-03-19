@@ -1,0 +1,89 @@
+{
+  "version": "1.0",
+  "archetypes": {
+    "spiral": {
+      "label": "Spiral Run",
+      "description": "Dominoes spiral outward from a central point, creating a mesmerising expanding circle effect.",
+      "domino_count_min": 80,
+      "domino_count_max": 300,
+      "default_domino_count": 150,
+      "spiral_turns_min": 1.0,
+      "spiral_turns_max": 4.0,
+      "default_spiral_turns": 2.0,
+      "camera_style": "tracking",
+      "default_duration_frames": 1950,
+      "fps": 30,
+      "finale_options": ["none", "tower", "ball"]
+    },
+    "s_curve": {
+      "label": "S-Curve Cascade",
+      "description": "Dominoes follow a smooth S-curve path, weaving left and right across the frame.",
+      "domino_count_min": 80,
+      "domino_count_max": 800,
+      "default_domino_count": 300,
+      "path_amplitude_min": 0.5,
+      "path_amplitude_max": 4.0,
+      "default_path_amplitude": 1.0,
+      "path_cycles_min": 0.5,
+      "path_cycles_max": 3.0,
+      "default_path_cycles": 1.0,
+      "camera_style": "tracking",
+      "default_duration_frames": 1950,
+      "fps": 30,
+      "finale_options": ["none", "tower", "ball", "ramp"]
+    },
+    "branching": {
+      "label": "Branching Fan",
+      "description": "A single trunk splits into multiple branches, each toppling in parallel for a satisfying fan-out.",
+      "domino_count_min": 100,
+      "domino_count_max": 500,
+      "default_domino_count": 200,
+      "branch_count_min": 2,
+      "branch_count_max": 5,
+      "default_branch_count": 3,
+      "camera_style": "tracking",
+      "default_duration_frames": 1950,
+      "fps": 30,
+      "finale_options": ["none", "tower"]
+    },
+    "word_spell": {
+      "label": "Word Spell",
+      "description": "Dominoes arranged to spell out a word or shape, toppling along the contours of the letters.",
+      "domino_count_min": 100,
+      "domino_count_max": 500,
+      "default_domino_count": 200,
+      "camera_style": "tracking",
+      "default_duration_frames": 1950,
+      "fps": 30,
+      "finale_options": ["none"]
+    },
+    "cascade": {
+      "label": "Wide Cascade",
+      "description": "Dominoes fill the frame in zigzag rows, creating a satisfying screen-filling cascade effect.",
+      "domino_count_min": 100,
+      "domino_count_max": 500,
+      "default_domino_count": 200,
+      "camera_style": "tracking",
+      "default_duration_frames": 1950,
+      "fps": 30,
+      "finale_options": ["none", "tower", "ball"]
+    }
+  },
+  "physics_defaults": {
+    "_comment": "Validated values — do not let LLM override these",
+    "domino_width": 0.08,
+    "domino_height": 0.4,
+    "domino_depth": 0.06,
+    "domino_mass": 0.3,
+    "domino_friction": 0.6,
+    "domino_bounce": 0.1,
+    "ground_friction": 0.8,
+    "spacing_ratio": 0.35,
+    "substeps_per_frame": 20,
+    "solver_iterations": 20,
+    "trigger_frame": 30,
+    "trigger_impulse": 1.5,
+    "trigger_tilt_degrees": 8.0,
+    "world_scale": 10
+  }
+}

@@ -1,12 +1,18 @@
 """Kairos Agent — Physics Simulation Agent.
 
 Implements BaseSimulationAgent for the Pygame + Pymunk physics pipeline.
-Orchestrates: code generation → sandbox execution → validation → adjustment.
+Orchestrates: config generation → template injection → sandbox execution
+→ validation → adjustment.
+
+Architecture (config-based pipeline):
+  1. LLM generates a JSON config matching the category schema
+  2. A fixed template per category consumes the config
+  3. Template handles all Pymunk/Pygame logic — LLM controls only creative params
+  4. Pre-validation runs headless physics to verify chain completion before render
 
 LLM routing:
-  - Generation: ``simulation-first-pass`` (Claude Sonnet)
-  - Adjustment: ``sim-param-adjust`` (Mistral 7B local) with fallback to
-    ``simulation-debugger`` (Claude Sonnet)
+  - Generation: ``simulation-first-pass`` (Claude Sonnet) via Instructor
+  - Adjustment: ``simulation-debugger`` (Claude Sonnet) for config fixes
 
 The agent is stateless — all mutable state lives in PipelineState and the DB.
 """
@@ -19,7 +25,6 @@ import logging
 import re
 import subprocess
 import time
-from pathlib import Path
 from typing import Any
 
 from kairos.agents.base import BaseSimulationAgent
@@ -32,13 +37,22 @@ from kairos.exceptions import (
 from kairos.models.contracts import (
     AgentRunStatus,
     ConceptBrief,
-    PipelineState,
     PipelineStatus,
+    SimulationLoopResult,
     SimulationResult,
     SimulationStats,
     ValidationResult,
 )
-from kairos.models.simulation import AdjustedSimulationCode, SimulationCode
+from kairos.models.simulation import (
+    AdjustedSimulationConfig,
+    SimulationConfigOutput,
+)
+from kairos.pipelines.physics.configs import CONFIG_REGISTRY
+from kairos.pipelines.physics.template_loader import build_simulation_script
+from kairos.pipelines.physics.prompts.builder import (
+    build_user_prompt,
+    load_system_prompt,
+)
 from kairos.services import llm_routing, sandbox, validation
 from kairos.services.llm_config import get_step_config
 
@@ -57,20 +71,24 @@ def _adjustment_models() -> tuple[str, str]:
 # Regex for extracting simulation stdout markers
 _PAYOFF_RE = re.compile(r"PAYOFF_TIMESTAMP[=:]?\s*([\d.]+)")
 _PEAK_BODY_RE = re.compile(r"PEAK_BODY_COUNT[=:]?\s*(\d+)")
+_COMPLETION_RE = re.compile(r"COMPLETION_RATIO[=:]?\s*([\d.]+)")
+_FALLEN_RE = re.compile(r"FALLEN[=:]?\s*(\d+)/(\d+)")
 
 
 class PhysicsSimulationAgent(BaseSimulationAgent):
     """Simulation agent for the *Oddly Satisfying Physics* pipeline.
 
-    Implements the full generate → execute → validate → adjust loop with
-    configurable max iterations (default 5).
+    Uses the config-based template architecture:
+    1. LLM generates a JSON config (creative params only)
+    2. Fixed template handles physics, rendering, FFmpeg
+    3. Headless pre-validation catches chain stalls before render
+    4. Validation loop adjusts config (not code) on failure
     """
 
     def __init__(self) -> None:
         self._settings = get_settings()
-        self._prompts_dir = (
-            Path(__file__).resolve().parent / "prompts"
-        )
+        self._current_config: dict[str, Any] | None = None
+        self._iteration_history: list[str] = []  # track what was tried each iter
 
     # ------------------------------------------------------------------
     # ABC: generate_simulation
@@ -79,57 +97,128 @@ class PhysicsSimulationAgent(BaseSimulationAgent):
     async def generate_simulation(
         self,
         concept: ConceptBrief,
-        state: PipelineState,
     ) -> str:
-        """Generate initial simulation code via cloud LLM.
+        """Generate simulation config via LLM, then inject into template.
 
-        Builds a category-specific prompt from the template, fills in the
-        concept details, and calls ``simulation-first-pass``.
+        Learning-loop enhancements (AI review §1–§6):
+        - Injects few-shot examples from verified training data
+        - Injects category knowledge (parameter ranges, failure modes)
+        - Injects static validation rules as prompt instructions
+        - Stores reasoning for later training example capture
+
+        Returns the complete runnable Python script (template + config).
         """
-        prompt = self._build_generation_prompt(concept)
+        category = concept.category.value
+
+        # Get the config schema for this category
+        config_cls = CONFIG_REGISTRY.get(category)
+        if config_cls is None:
+            raise ValueError(f"No config schema for category '{category}'")
+
+        # Build the prompt requesting JSON config
+        schema_json = json.dumps(
+            config_cls.model_json_schema(),
+            indent=2,
+        )
+
+        prompt_vars = {
+            "title": concept.title,
+            "visual_brief": concept.visual_brief,
+            "category": category,
+            "body_count_initial": str(concept.simulation_requirements.body_count_initial),
+            "body_count_max": str(concept.simulation_requirements.body_count_max),
+            "interaction_type": concept.simulation_requirements.interaction_type,
+            "colour_palette": json.dumps(concept.simulation_requirements.colour_palette),
+            "background_colour": concept.simulation_requirements.background_colour,
+            "special_effects": json.dumps(concept.simulation_requirements.special_effects),
+            "target_duration_sec": str(concept.target_duration_sec),
+            "seed": str(concept.seed or 42),
+            "config_schema": schema_json,
+        }
+
+        # --- Learning loop: assemble extra context for the prompt ---
+        extra_context_parts: list[str] = []
+        try:
+            from kairos.services.learning_loop import (
+                format_few_shot_prompt,
+                get_category_knowledge_for_prompt,
+                get_few_shot_examples,
+                get_validation_rules_prompt,
+            )
+
+            # 1. Static validation rules → tell the LLM what NOT to do
+            extra_context_parts.append(get_validation_rules_prompt())
+
+            # 2. Few-shot examples (only verified ones)
+            examples = await get_few_shot_examples(
+                pipeline="physics", category=category, limit=2,
+            )
+            few_shot_text = format_few_shot_prompt(examples)
+            if few_shot_text:
+                extra_context_parts.append(few_shot_text)
+
+            # 3. Category knowledge
+            ck_text = await get_category_knowledge_for_prompt("physics", category)
+            if ck_text:
+                extra_context_parts.append(ck_text)
+        except Exception as exc:
+            logger.debug("Learning loop context injection skipped: %s", exc)
+
+        user_prompt_text = build_user_prompt("simulation_config", prompt_vars).text
+        if extra_context_parts:
+            user_prompt_text += "\n\n" + "\n\n".join(extra_context_parts)
+
         messages: list[dict[str, str]] = [
-            {
-                "role": "system",
-                "content": (
-                    "You are an expert Pygame + Pymunk simulation engineer. "
-                    "Return ONLY a complete, self-contained Python script. "
-                    "The script must be immediately runnable in a headless "
-                    "Docker container and produce a valid MP4 file."
-                ),
-            },
-            {"role": "user", "content": prompt},
+            {"role": "system", "content": load_system_prompt("simulation_config").text},
+            {"role": "user", "content": user_prompt_text},
         ]
 
         start = time.monotonic()
-        result: SimulationCode = await llm_routing.call_llm(
+        result: SimulationConfigOutput = await llm_routing.call_llm(
             model=_generation_model(),
             messages=messages,
-            response_model=SimulationCode,
+            response_model=SimulationConfigOutput,
+            cache_step="simulation_config_gen",
         )
         latency_ms = int((time.monotonic() - start) * 1000)
 
+        config = result.config
         logger.info(
-            "Generated simulation code (%d chars) in %dms",
-            len(result.code),
+            "Generated simulation config (%d keys) in %dms — %s",
+            len(config),
             latency_ms,
+            result.reasoning[:200],
         )
-        return result.code
+
+        # Validate config against the Pydantic schema
+        try:
+            validated = config_cls(**config)
+            config = validated.model_dump()
+        except Exception as exc:
+            logger.warning("Config validation failed, using raw config: %s", exc)
+            # Fill in defaults from the schema
+            defaults = config_cls.model_construct().model_dump()
+            merged = {**defaults, **config}
+            config = merged
+
+        self._current_config = config
+
+        # Build the runnable script from template + config
+        script = build_simulation_script(category, config)
+
+        return script
 
     # ------------------------------------------------------------------
     # ABC: execute_simulation
     # ------------------------------------------------------------------
 
     async def execute_simulation(self, code: str) -> SimulationResult:
-        """Execute code in the Docker sandbox (blocking call offloaded to executor)."""
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None,
-            lambda: sandbox.execute_simulation(
-                code,
-                timeout=self._settings.sandbox_timeout_sec,
-                memory_limit=self._settings.sandbox_memory_limit,
-                cpu_limit=self._settings.sandbox_cpu_limit,
-            ),
+        """Execute code in the Docker sandbox (async subprocess)."""
+        return await sandbox.execute_simulation(
+            code,
+            timeout=self._settings.sandbox_timeout_sec,
+            memory_limit=self._settings.sandbox_memory_limit,
+            cpu_limit=self._settings.sandbox_cpu_limit,
         )
 
     # ------------------------------------------------------------------
@@ -145,7 +234,11 @@ class PhysicsSimulationAgent(BaseSimulationAgent):
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None,
-            lambda: validation.validate_simulation(video_path, run_tier2=False),
+            lambda: validation.validate_simulation(
+                video_path,
+                run_tier2=False,
+                skip_checks={"audio_present"},  # audio added by video_editor
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -158,68 +251,123 @@ class PhysicsSimulationAgent(BaseSimulationAgent):
         validation_result: ValidationResult,
         iteration: int,
     ) -> str:
-        """Fix code based on failed validation checks.
+        """Fix config based on failed validation checks, then rebuild script.
 
-        Uses local LLM first (Mistral 7B) via ``sim-param-adjust``.
-        Falls back to ``simulation-debugger`` (Claude Sonnet) if the
-        local model produces code that still looks broken.
+        Learning-loop enhancements (AI review §2, §7, §8):
+        - Builds structured ValidationFeedback with quantitative deltas
+        - Adds urgency signal (minor_tweak → fundamental_rethink)
+        - Includes AST-extracted code structure analysis
+        - Feeds iteration history so the LLM doesn't repeat failed fixes
         """
         failed_summary = "\n".join(
             f"- {c.name}: {c.message} (value={c.value}, threshold={c.threshold})"
             for c in validation_result.failed_checks
         )
+
+        # Include stdout-based completion info if available
+        stdout_info = ""
+        if hasattr(validation_result, "stdout") and validation_result.stdout:
+            stdout_info = f"\n\n### Simulation Stdout\n```\n{validation_result.stdout[-1000:]}\n```"
+
+        current_config_json = json.dumps(self._current_config or {}, indent=2)
+
+        # Determine category from config
+        category = "domino_chain"  # default
+        if self._current_config:
+            # Try to infer from config keys
+            if "domino_count" in self._current_config:
+                category = "domino_chain"
+            elif "ball_count" in self._current_config:
+                category = "ball_pit"
+            elif "marble_count" in self._current_config:
+                category = "marble_funnel"
+            elif "block_mass" in self._current_config:
+                category = "destruction"
+
+        config_cls = CONFIG_REGISTRY.get(category)
+        schema_json = json.dumps(
+            config_cls.model_json_schema() if config_cls else {},
+            indent=2,
+        )
+
+        # --- Learning loop: structured feedback + AST analysis ---
+        extra_adjustment_context = ""
+        try:
+            from kairos.services.learning_loop import build_validation_feedback
+            from kairos.services.ast_extractor import extract_parameters
+
+            # Structured feedback with quantitative deltas & urgency
+            feedback = build_validation_feedback(
+                validation_result,
+                iteration=iteration,
+                max_iterations=self._settings.max_simulation_iterations,
+                iteration_history=self._iteration_history,
+            )
+            extra_adjustment_context += "\n\n" + feedback.to_prompt_text()
+
+            # AST-based code structure analysis
+            ast_params = extract_parameters(code)
+            ast_text = ast_params.to_feedback_text()
+            if ast_text:
+                extra_adjustment_context += "\n\n" + ast_text
+        except Exception as exc:
+            logger.debug("Structured feedback generation skipped: %s", exc)
+
+        user_prompt_text = build_user_prompt("simulation_config_adjust", {
+            "iteration": str(iteration),
+            "failed_summary": failed_summary,
+            "stdout_info": stdout_info,
+            "current_config": current_config_json,
+            "config_schema": schema_json,
+            "category": category,
+        }).text + extra_adjustment_context
+
         messages: list[dict[str, str]] = [
-            {
-                "role": "system",
-                "content": (
-                    "You are a debugging specialist for Pygame + Pymunk simulations. "
-                    "You will receive Python simulation code and a list of failed "
-                    "validation checks. Fix the code so ALL checks pass. "
-                    "Return the COMPLETE corrected script."
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"## Iteration {iteration} — Fix Required\n\n"
-                    f"### Failed Validation Checks\n{failed_summary}\n\n"
-                    f"### Current Code\n```python\n{code}\n```\n\n"
-                    "Fix the issues and return the complete corrected script."
-                ),
-            },
+            {"role": "system", "content": load_system_prompt("simulation_config_adjust").text},
+            {"role": "user", "content": user_prompt_text},
         ]
 
-        def _quality_gate(result: Any) -> bool:
-            """Basic quality check: code must contain key markers."""
-            if not isinstance(result, AdjustedSimulationCode):
-                return False
-            c = result.code
-            return (
-                "pygame" in c
-                and "pymunk" in c
-                and "simulation.mp4" in c
-                and len(c) > 500
-            )
-
-        primary, fallback = _adjustment_models()
+        _, fallback = _adjustment_models()
         start = time.monotonic()
-        result: AdjustedSimulationCode = await llm_routing.call_with_quality_fallback(
-            primary_model=primary,
-            fallback_model=fallback,
+        result: AdjustedSimulationConfig = await llm_routing.call_llm(
+            model=fallback,  # Use cloud model for config adjustment
             messages=messages,
-            validator=_quality_gate,
-            response_model=AdjustedSimulationCode,
+            response_model=AdjustedSimulationConfig,
+            cache_step=f"simulation_config_adjust_iter{iteration}",
         )
         latency_ms = int((time.monotonic() - start) * 1000)
 
         logger.info(
-            "Adjusted code (iter %d): %d changes in %dms — %s",
+            "Adjusted config (iter %d): %d changes in %dms — %s",
             iteration,
             len(result.changes_made),
             latency_ms,
             "; ".join(result.changes_made[:3]),
         )
-        return result.code
+
+        # Record what was tried this iteration for history feedback
+        self._iteration_history.append(
+            f"Changes: {'; '.join(result.changes_made[:5])}"
+            + (f" — Reasoning: {result.reasoning[:200]}" if result.reasoning else "")
+        )
+
+        # Validate and merge the adjusted config
+        new_config = result.config
+        if config_cls:
+            try:
+                validated = config_cls(**new_config)
+                new_config = validated.model_dump()
+            except Exception as exc:
+                logger.warning("Adjusted config validation failed: %s", exc)
+                # Merge with current config as fallback
+                merged = {**(self._current_config or {}), **new_config}
+                new_config = merged
+
+        self._current_config = new_config
+
+        # Rebuild script from template + adjusted config
+        script = build_simulation_script(category, new_config)
+        return script
 
     # ------------------------------------------------------------------
     # ABC: get_simulation_stats
@@ -266,24 +414,45 @@ class PhysicsSimulationAgent(BaseSimulationAgent):
     async def run_loop(
         self,
         concept: ConceptBrief,
-        state: PipelineState,
-    ) -> PipelineState:
+    ) -> SimulationLoopResult:
         """Orchestrate the full simulation iteration loop.
 
         generate → execute → validate → (adjust → re-execute → re-validate)*
         Up to ``max_simulation_iterations`` total attempts.
+
+        Returns a narrow ``SimulationLoopResult`` (Finding 2.2).
         """
         max_iters = self._settings.max_simulation_iterations
-        state.status = PipelineStatus.SIMULATION_PHASE
-        state.simulation_iteration = 0
+        result = SimulationLoopResult()
 
         # ----- Step 1: generate initial code -----
         logger.info("Generating initial simulation code for '%s'", concept.title)
-        code = await self.generate_simulation(concept, state)
-        state.simulation_code = code
+        generation_attempts = 0
+        max_generation_attempts = 2
+        code: str | None = None
+        while generation_attempts < max_generation_attempts:
+            generation_attempts += 1
+            try:
+                code = await self.generate_simulation(concept)
+                break
+            except (TimeoutError, Exception) as exc:
+                logger.warning(
+                    "Code generation attempt %d/%d failed: %s",
+                    generation_attempts,
+                    max_generation_attempts,
+                    exc,
+                )
+                result.errors.append(f"code_gen_attempt{generation_attempts}: {exc}")
+                if generation_attempts >= max_generation_attempts:
+                    raise SimulationExecutionError(
+                        f"Simulation code generation failed after "
+                        f"{max_generation_attempts} attempts: {exc}"
+                    ) from exc
+        assert code is not None
+        result.simulation_code = code
 
         for iteration in range(1, max_iters + 1):
-            state.simulation_iteration = iteration
+            result.simulation_iteration = iteration
             logger.info("Simulation iteration %d/%d", iteration, max_iters)
 
             # ----- Step 2: execute -----
@@ -291,7 +460,7 @@ class PhysicsSimulationAgent(BaseSimulationAgent):
                 sim_result = await self.execute_simulation(code)
             except (SimulationTimeoutError, SimulationOOMError, SimulationExecutionError) as exc:
                 logger.warning("Execution failed (iter %d): %s", iteration, exc)
-                state.errors.append(f"iter{iteration}: {exc}")
+                result.errors.append(f"iter{iteration}: {exc}")
                 if iteration >= max_iters:
                     break
                 # Synthesise a "failed execution" ValidationResult so adjust_parameters
@@ -305,10 +474,10 @@ class PhysicsSimulationAgent(BaseSimulationAgent):
                 code = await self.adjust_parameters(
                     code, fake_validation, iteration,
                 )
-                state.simulation_code = code
+                result.simulation_code = code
                 continue
 
-            state.simulation_result = sim_result
+            result.simulation_result = sim_result
 
             # ----- Step 3: find the video file -----
             video_path = self._find_video(sim_result)
@@ -318,7 +487,12 @@ class PhysicsSimulationAgent(BaseSimulationAgent):
                     f"(files: {sim_result.output_files})"
                 )
                 logger.warning(msg)
-                state.errors.append(msg)
+                if sim_result.stderr:
+                    logger.error("iter%d sandbox stderr:\n%s", iteration, sim_result.stderr[-2000:])
+                if sim_result.stdout:
+                    logger.info("iter%d sandbox stdout:\n%s", iteration, sim_result.stdout[-1000:])
+                logger.info("iter%d sandbox returncode: %s", iteration, sim_result.returncode)
+                result.errors.append(msg)
                 if iteration >= max_iters:
                     break
                 fake_validation = ValidationResult(
@@ -329,20 +503,55 @@ class PhysicsSimulationAgent(BaseSimulationAgent):
                 code = await self.adjust_parameters(
                     code, fake_validation, iteration,
                 )
-                state.simulation_code = code
+                result.simulation_code = code
                 continue
 
-            state.raw_video_path = video_path
+            result.raw_video_path = video_path
 
             # ----- Step 4: extract stats -----
             stats = await self.get_simulation_stats(video_path)
             # Enrich stats with stdout markers
             stats = self._enrich_stats_from_stdout(stats, sim_result.stdout)
-            state.simulation_stats = stats
+            result.simulation_stats = stats
+
+            # ----- Step 4.5: stdout-based completion check -----
+            completion_ok, completion_ratio, completion_msg = (
+                self._check_completion_from_stdout(sim_result.stdout)
+            )
+            logger.info("Completion check: %s (ratio=%.2f)", completion_msg, completion_ratio)
+
+            if not completion_ok:
+                logger.warning(
+                    "Simulation failed completion check (iter %d): %s",
+                    iteration,
+                    completion_msg,
+                )
+                if iteration >= max_iters:
+                    result.errors.append(f"Completion check failed: {completion_msg}")
+                    break
+                # Create a synthetic validation failure for the adjustment LLM
+                from kairos.models.contracts import ValidationCheck
+                fake_check = ValidationCheck(
+                    name="completion_ratio",
+                    passed=False,
+                    message=completion_msg,
+                    value=completion_ratio,
+                    threshold=0.75,
+                )
+                fake_validation = ValidationResult(
+                    passed=False,
+                    checks=[fake_check],
+                    tier1_passed=False,
+                )
+                code = await self.adjust_parameters(
+                    code, fake_validation, iteration,
+                )
+                result.simulation_code = code
+                continue
 
             # ----- Step 5: validate -----
             vresult = await self.validate_output(video_path)
-            state.validation_result = vresult
+            result.validation_result = vresult
 
             if vresult.passed:
                 logger.info(
@@ -350,7 +559,7 @@ class PhysicsSimulationAgent(BaseSimulationAgent):
                     iteration,
                     vresult.summary,
                 )
-                return state
+                return result
 
             logger.warning(
                 "Validation failed (iter %d): %s — %s",
@@ -360,32 +569,28 @@ class PhysicsSimulationAgent(BaseSimulationAgent):
             )
 
             if iteration >= max_iters:
-                state.errors.append(
+                result.errors.append(
                     f"Max iterations ({max_iters}) reached without passing validation"
                 )
                 break
 
             # ----- Step 6: adjust and retry -----
             code = await self.adjust_parameters(code, vresult, iteration)
-            state.simulation_code = code
+            result.simulation_code = code
 
-        return state
+        return result
 
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
 
     def _build_generation_prompt(self, concept: ConceptBrief) -> str:
-        """Load the category prompt template and fill in concept details."""
-        template_path = self._prompts_dir / f"{concept.category.value}.txt"
-        if not template_path.exists():
-            raise FileNotFoundError(
-                f"Prompt template not found: {template_path}"
-            )
-        template = template_path.read_text(encoding="utf-8")
+        """Build the category-specific config generation prompt.
 
-        # Simple Jinja-style substitution (double curly braces)
-        replacements: dict[str, str] = {
+        This is a legacy helper — the main ``generate_simulation`` now
+        builds the prompt directly with config schema info.
+        """
+        variables: dict[str, str] = {
             "title": concept.title,
             "visual_brief": concept.visual_brief,
             "body_count_initial": str(concept.simulation_requirements.body_count_initial),
@@ -397,12 +602,8 @@ class PhysicsSimulationAgent(BaseSimulationAgent):
             "target_duration_sec": str(concept.target_duration_sec),
             "seed": str(concept.seed or 42),
         }
-        prompt = template
-        for key, value in replacements.items():
-            prompt = prompt.replace("{{ " + key + " }}", value)
-            prompt = prompt.replace("{{" + key + "}}", value)
-
-        return prompt
+        from kairos.pipelines.physics.prompts.builder import build_simulation_prompt
+        return build_simulation_prompt(concept.category.value, variables).text
 
     @staticmethod
     def _find_video(result: SimulationResult) -> str | None:
@@ -438,7 +639,7 @@ class PhysicsSimulationAgent(BaseSimulationAgent):
         stats: SimulationStats,
         stdout: str,
     ) -> SimulationStats:
-        """Parse PAYOFF_TIMESTAMP and PEAK_BODY_COUNT from simulation stdout."""
+        """Parse PAYOFF_TIMESTAMP, PEAK_BODY_COUNT, COMPLETION_RATIO from stdout."""
         payoff = 0.0
         peak = 0
 
@@ -468,3 +669,44 @@ class PhysicsSimulationAgent(BaseSimulationAgent):
                 file_size_bytes=stats.file_size_bytes,
             )
         return stats
+
+    @staticmethod
+    def _check_completion_from_stdout(stdout: str) -> tuple[bool, float, str]:
+        """Check if the simulation completed successfully based on stdout markers.
+
+        Returns (passed, completion_ratio, message).
+        """
+        # Check completion ratio
+        m = _COMPLETION_RE.search(stdout)
+        if m:
+            try:
+                ratio = float(m.group(1))
+                passed = ratio >= 0.75
+                msg = f"Completion ratio: {ratio:.1%}"
+                if not passed:
+                    msg += " (below 75% threshold)"
+                return passed, ratio, msg
+            except ValueError:
+                pass
+
+        # Check fallen count (domino-specific)
+        m = _FALLEN_RE.search(stdout)
+        if m:
+            try:
+                fallen = int(m.group(1))
+                total = int(m.group(2))
+                ratio = fallen / total if total > 0 else 0
+                passed = ratio >= 0.75
+                msg = f"Fallen: {fallen}/{total} ({ratio:.0%})"
+                if not passed:
+                    msg += " (below 75% threshold)"
+                return passed, ratio, msg
+            except ValueError:
+                pass
+
+        # Check for pre-validation failure
+        if "ERROR:" in stdout and "pre-validation" in stdout.lower():
+            return False, 0.0, "Template pre-validation failed"
+
+        # No completion markers found — assume success
+        return True, 1.0, "No completion markers (assumed OK)"

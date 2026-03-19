@@ -1,0 +1,69 @@
+{
+  "version": "1.0",
+  "archetypes": {
+    "funnel_race": {
+      "label": "Funnel Race",
+      "description": "Release marbles, funnel them down through ramps and peg sections into finish bins.",
+      "allowed_modules": [
+        "start_gate",
+        "straight_ramp",
+        "curved_ramp",
+        "funnel",
+        "peg_field",
+        "drop_chute",
+        "guard_rail",
+        "finish_bins"
+      ],
+      "required_sequence": ["start_gate", "...", "finish_bins"],
+      "min_modules": 4,
+      "max_modules": 7,
+      "marble_count_min": 15,
+      "marble_count_max": 40,
+      "allowed_branch_count": 0,
+      "camera_style": "hero_angle",
+      "default_duration_frames": 1950,
+      "fps": 30
+    },
+    "race_lane": {
+      "label": "Zigzag Race",
+      "description": "Five marbles race down a zigzag ramp course with turns and a finish tray.",
+      "allowed_modules": [
+        "start_platform",
+        "ramp_section",
+        "turn_section",
+        "finish_tray"
+      ],
+      "required_sequence": ["start_platform", "...", "finish_tray"],
+      "min_modules": 8,
+      "max_modules": 14,
+      "marble_count_min": 5,
+      "marble_count_max": 5,
+      "allowed_branch_count": 0,
+      "n_zigzags": 3,
+      "camera_style": "marble_follow",
+      "default_duration_frames": 1950,
+      "fps": 30
+    },
+    "peg_maze": {
+      "label": "Peg Maze",
+      "description": "Guided path with high peg density, slower visual pacing, mesmerising marble flow.",
+      "allowed_modules": [
+        "start_gate",
+        "peg_field",
+        "straight_ramp",
+        "funnel",
+        "guard_rail",
+        "finish_bins"
+      ],
+      "required_sequence": ["start_gate", "peg_field", "...", "finish_bins"],
+      "min_modules": 4,
+      "max_modules": 6,
+      "marble_count_min": 20,
+      "marble_count_max": 60,
+      "allowed_branch_count": 0,
+      "camera_style": "top_down",
+      "default_duration_frames": 1950,
+      "fps": 30
+    }
+  }
+}

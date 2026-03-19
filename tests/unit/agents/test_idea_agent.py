@@ -20,6 +20,7 @@ from kairos.models.contracts import (
     AudioBrief,
     ConceptBrief,
     EnergyLevel,
+    IdeaAgentInput,
     PipelineState,
     ScenarioCategory,
     SimulationRequirements,
@@ -373,12 +374,12 @@ class TestGenerateConcept:
         ]
 
         agent = PhysicsIdeaAgent(use_llm_selector=True)
-        state = PipelineState(pipeline="physics")
+        idea_input = IdeaAgentInput(pipeline="physics")
 
         # Patch _build_report to avoid DB dependency
         agent._build_report = AsyncMock(return_value=_make_inventory_report())  # type: ignore[method-assign]
 
-        concept = await agent.generate_concept(state)
+        concept = await agent.generate_concept(idea_input)
         assert isinstance(concept, ConceptBrief)
         assert concept.pipeline == "physics"
         assert concept.title == "Top Concept"
@@ -394,12 +395,12 @@ class TestGenerateConcept:
         mock_call.return_value = _make_concept_response()
 
         agent = PhysicsIdeaAgent(use_llm_selector=False)
-        state = PipelineState(pipeline="physics")
+        idea_input = IdeaAgentInput(pipeline="physics")
         agent._build_report = AsyncMock(  # type: ignore[method-assign]
             return_value=_make_inventory_report(last_category="ball_pit"),
         )
 
-        concept = await agent.generate_concept(state)
+        concept = await agent.generate_concept(idea_input)
         assert isinstance(concept, ConceptBrief)
         # Only one LLM call (concept developer), not two
         assert mock_call.call_count == 1
@@ -418,10 +419,10 @@ class TestGenerateConcept:
         ]
 
         agent = PhysicsIdeaAgent()
-        state = PipelineState(pipeline="physics")
+        idea_input = IdeaAgentInput(pipeline="physics")
         agent._build_report = AsyncMock(return_value=_make_inventory_report())  # type: ignore[method-assign]
 
-        concept = await agent.generate_concept(state)
+        concept = await agent.generate_concept(idea_input)
         assert concept.category == ScenarioCategory.DESTRUCTION
 
     @pytest.mark.asyncio
@@ -439,11 +440,11 @@ class TestGenerateConcept:
         ]
 
         agent = PhysicsIdeaAgent()
-        state = PipelineState(pipeline="physics")
+        idea_input = IdeaAgentInput(pipeline="physics")
         agent._build_report = AsyncMock(return_value=_make_inventory_report())  # type: ignore[method-assign]
 
         with pytest.raises(ConceptGenerationError):
-            await agent.generate_concept(state)
+            await agent.generate_concept(idea_input)
 
     @pytest.mark.asyncio
     @patch("kairos.pipelines.physics.idea_agent.call_llm")
@@ -465,11 +466,11 @@ class TestGenerateConcept:
         ]
 
         agent = PhysicsIdeaAgent()
-        state = PipelineState(pipeline="physics")
+        idea_input = IdeaAgentInput(pipeline="physics")
         agent._build_report = AsyncMock(return_value=_make_inventory_report())  # type: ignore[method-assign]
 
         # Should succeed on second attempt
-        concept = await agent.generate_concept(state)
+        concept = await agent.generate_concept(idea_input)
         assert isinstance(concept, ConceptBrief)
 
     @pytest.mark.asyncio
@@ -482,11 +483,11 @@ class TestGenerateConcept:
         mock_call.side_effect = RuntimeError("Persistent error")
 
         agent = PhysicsIdeaAgent(use_llm_selector=False)
-        state = PipelineState(pipeline="physics")
+        idea_input = IdeaAgentInput(pipeline="physics")
         agent._build_report = AsyncMock(return_value=_make_inventory_report())  # type: ignore[method-assign]
 
         with pytest.raises(ConceptGenerationError, match="Failed to generate concept"):
-            await agent.generate_concept(state)
+            await agent.generate_concept(idea_input)
 
     @pytest.mark.asyncio
     @patch("kairos.pipelines.physics.idea_agent.call_llm")
@@ -495,7 +496,7 @@ class TestGenerateConcept:
         mock_call.return_value = _make_concept_response()
 
         agent = PhysicsIdeaAgent(use_llm_selector=False)
-        state = PipelineState(pipeline="physics")
+        idea_input = IdeaAgentInput(pipeline="physics")
         # Empty inventory report
         agent._build_report = AsyncMock(  # type: ignore[method-assign]
             return_value=InventoryReport(
@@ -505,7 +506,7 @@ class TestGenerateConcept:
             ),
         )
 
-        concept = await agent.generate_concept(state)
+        concept = await agent.generate_concept(idea_input)
         assert isinstance(concept, ConceptBrief)
 
 
