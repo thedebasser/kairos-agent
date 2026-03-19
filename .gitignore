@@ -129,3 +129,8 @@ blend/scripts/test_result.json
 # ─── Auto-generated knowledge / learning files ────────────────────────────────
 # These are written at runtime by the learning loop — not source-controlled.
 knowledge/cloud_learnings/
+
+# ─── Angular / Node.js ────────────────────────────────────────────────────────
+node_modules/
+web/dist/
+web/.angular/
