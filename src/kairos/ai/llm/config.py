@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 # Config path — lives at repository root next to litellm_config.yaml
 # ---------------------------------------------------------------------------
 
-_CONFIG_PATH = Path(__file__).resolve().parent.parent.parent.parent / "llm_config.yaml"
+_CONFIG_PATH = Path(__file__).resolve().parents[4] / "llm_config.yaml"
 
 
 # ---------------------------------------------------------------------------

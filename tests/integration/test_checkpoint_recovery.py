@@ -139,7 +139,7 @@ class TestCheckpointRecovery:
         checkpointer = MemorySaver()
         thread_id = "ckpt-approve"
 
-        with patch("kairos.pipeline.graph.get_pipeline", return_value=adapter):
+        with patch("kairos.orchestrator.graph.get_pipeline", return_value=adapter):
             compiled = compile_pipeline(checkpointer=checkpointer)
             config = {"configurable": {"thread_id": thread_id}}
 
@@ -150,7 +150,7 @@ class TestCheckpointRecovery:
         assert result1["review_action"] is None
 
         # Run 2: resume with approval
-        with patch("kairos.pipeline.graph.get_pipeline", return_value=adapter):
+        with patch("kairos.orchestrator.graph.get_pipeline", return_value=adapter):
             compiled2 = compile_pipeline(checkpointer=checkpointer)
             result2 = await compiled2.ainvoke(
                 {"review_action": ReviewAction.APPROVED.value},
@@ -172,7 +172,7 @@ class TestCheckpointRecovery:
         checkpointer = MemorySaver()
         thread_id = "ckpt-bad-concept"
 
-        with patch("kairos.pipeline.graph.get_pipeline", return_value=adapter):
+        with patch("kairos.orchestrator.graph.get_pipeline", return_value=adapter):
             compiled = compile_pipeline(checkpointer=checkpointer)
             config = {"configurable": {"thread_id": thread_id}}
 
@@ -185,7 +185,7 @@ class TestCheckpointRecovery:
 
         # Run 2: resume with bad_concept — verify idea agent is called again
         # Use recursion_limit to prevent infinite loop with mocked agents
-        with patch("kairos.pipeline.graph.get_pipeline", return_value=adapter):
+        with patch("kairos.orchestrator.graph.get_pipeline", return_value=adapter):
             compiled2 = compile_pipeline(checkpointer=checkpointer)
             try:
                 await compiled2.ainvoke(
@@ -204,7 +204,7 @@ class TestCheckpointRecovery:
         checkpointer = MemorySaver()
         thread_id = "ckpt-preserve"
 
-        with patch("kairos.pipeline.graph.get_pipeline", return_value=adapter):
+        with patch("kairos.orchestrator.graph.get_pipeline", return_value=adapter):
             compiled = compile_pipeline(checkpointer=checkpointer)
             config = {"configurable": {"thread_id": thread_id}}
 

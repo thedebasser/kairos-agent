@@ -27,7 +27,7 @@ def _mock_settings():
     settings.cost_alert_threshold_usd = 0.30
     settings.discord_webhook_url = "https://discord.com/api/webhooks/test"
     settings.slack_webhook_url = ""
-    with patch("kairos.services.monitoring.get_settings", return_value=settings):
+    with patch("kairos.ai.tracing.sinks.langfuse_sink.get_settings", return_value=settings):
         yield settings
 
 

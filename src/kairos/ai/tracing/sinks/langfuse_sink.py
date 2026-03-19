@@ -186,7 +186,7 @@ class MetricEntry:
     """Single metric data point."""
 
     name: str
-    timestamp: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     cost_usd: float = 0.0
     model: str = ""
     latency_ms: int = 0

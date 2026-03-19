@@ -53,7 +53,9 @@ from kairos.ai.prompts.physics.builder import (
     build_user_prompt,
     load_system_prompt,
 )
-from kairos.services import llm_routing, sandbox, validation
+from kairos.ai.llm import routing as llm_routing
+from kairos.engines.pymunk import sandbox
+from kairos.services import validation
 from kairos.ai.llm.config import get_step_config
 
 logger = logging.getLogger(__name__)

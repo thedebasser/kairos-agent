@@ -140,7 +140,7 @@ class TestPipelineE2E:
         """Pipeline runs from START to pending_review then pauses."""
         adapter, concept, video_out = _build_mock_adapter()
 
-        with patch("kairos.pipeline.graph.get_pipeline", return_value=adapter):
+        with patch("kairos.orchestrator.graph.get_pipeline", return_value=adapter):
             checkpointer = MemorySaver()
             compiled = compile_pipeline(checkpointer=checkpointer)
 
@@ -166,7 +166,7 @@ class TestPipelineE2E:
             fail_state,
         ]
 
-        with patch("kairos.pipeline.graph.get_pipeline", return_value=adapter):
+        with patch("kairos.orchestrator.graph.get_pipeline", return_value=adapter):
             compiled = compile_pipeline(checkpointer=MemorySaver())
 
             final = await compiled.ainvoke(
@@ -187,7 +187,7 @@ class TestPipelineE2E:
             concept,
         ]
 
-        with patch("kairos.pipeline.graph.get_pipeline", return_value=adapter):
+        with patch("kairos.orchestrator.graph.get_pipeline", return_value=adapter):
             compiled = compile_pipeline(checkpointer=MemorySaver())
 
             final = await compiled.ainvoke(

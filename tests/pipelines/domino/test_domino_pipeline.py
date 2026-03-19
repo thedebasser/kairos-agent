@@ -308,8 +308,10 @@ class TestDominoIdeaAgent:
         idea_input = IdeaAgentInput(pipeline="domino")
 
         with patch("kairos.pipelines.domino.idea_agent.call_llm", new_callable=AsyncMock) as mock_llm, \
-             patch("kairos.services.response_cache.get_cache", return_value=None):
+             patch("kairos.pipelines.domino.idea_agent.call_with_quality_fallback", new_callable=AsyncMock) as mock_qf, \
+             patch("kairos.ai.llm.cache.get_cache", return_value=None):
             mock_llm.return_value = domino_config
+            mock_qf.return_value = domino_config
             concept = await agent.generate_concept(idea_input)
 
         assert concept.pipeline == "domino"
@@ -520,7 +522,7 @@ class TestDominoCaching:
             "concept": domino_concept.model_dump(mode="json"),
         }
 
-        with patch("kairos.services.response_cache.get_cache",
+        with patch("kairos.ai.llm.cache.get_cache",
                     return_value=mock_cache), \
              patch("kairos.pipelines.domino.idea_agent.call_llm",
                     new_callable=AsyncMock) as mock_llm:

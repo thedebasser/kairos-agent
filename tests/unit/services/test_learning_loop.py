@@ -318,7 +318,7 @@ class TestLearningLoopEnabled:
         mock_settings = MagicMock()
         mock_settings.learning_loop_enabled = False
 
-        with patch("kairos.services.learning_loop.get_settings", return_value=mock_settings):
+        with patch("kairos.ai.learning.learning_loop.get_settings", return_value=mock_settings):
             # Should return without touching DB
             await record_training_example(
                 pipeline="physics",
@@ -337,7 +337,7 @@ class TestLearningLoopEnabled:
         mock_settings = MagicMock()
         mock_settings.learning_loop_enabled = True
 
-        with patch("kairos.services.learning_loop.get_settings", return_value=mock_settings):
+        with patch("kairos.ai.learning.learning_loop.get_settings", return_value=mock_settings):
             # DB will fail (no real connection) but it should not raise
             await record_training_example(
                 pipeline="physics",

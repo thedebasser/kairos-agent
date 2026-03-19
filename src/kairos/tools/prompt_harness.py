@@ -75,64 +75,8 @@ SAMPLE_CONCEPTS: dict[str, ConceptBrief] = {
         target_duration_sec=65,
         seed=42,
     ),
-    "marble_funnel": ConceptBrief(
-        pipeline="physics",
-        category=ScenarioCategory.MARBLE_FUNNEL,
-        title="Spiral Marble Run",
-        visual_brief=(
-            "Marbles are dropped from the top of a spiral funnel track, "
-            "accelerating as they descend through increasingly tight curves "
-            "before collecting in a mesmerizing swirl at the bottom."
-        ),
-        simulation_requirements=SimulationRequirements(
-            body_count_initial=3,
-            body_count_max=200,
-            interaction_type="roll_collect",
-            colour_palette=["#E74C3C", "#3498DB", "#2ECC71", "#F39C12", "#9B59B6"],
-            background_colour="#0d1117",
-            special_effects=["trails"],
-        ),
-        audio_brief=AudioBrief(
-            mood=["mesmerizing", "flowing"],
-            tempo_bpm_min=90,
-            tempo_bpm_max=120,
-            energy_curve=EnergyLevel.BUILDING,
-        ),
-        hook_text="So satisfying to watch",
-        novelty_score=6.5,
-        feasibility_score=7.5,
-        target_duration_sec=65,
-        seed=123,
-    ),
-    "domino_chain": ConceptBrief(
-        pipeline="physics",
-        category=ScenarioCategory.DOMINO_CHAIN,
-        title="Colour-Coded Domino Spiral",
-        visual_brief=(
-            "A massive spiral of colour-coded dominoes is triggered from "
-            "the centre, creating an expanding wave of falling dominoes "
-            "that reveals a rainbow pattern as they topple outward."
-        ),
-        simulation_requirements=SimulationRequirements(
-            body_count_initial=200,
-            body_count_max=500,
-            interaction_type="topple_cascade",
-            colour_palette=["#FF6B6B", "#FFD93D", "#6BCB77", "#4D96FF", "#9B59B6"],
-            background_colour="#16213e",
-            special_effects=[],
-        ),
-        audio_brief=AudioBrief(
-            mood=["dramatic", "building"],
-            tempo_bpm_min=100,
-            tempo_bpm_max=140,
-            energy_curve=EnergyLevel.CLIMAX,
-        ),
-        hook_text="Wait for the spiral",
-        novelty_score=7.5,
-        feasibility_score=6.0,
-        target_duration_sec=65,
-        seed=256,
-    ),
+    # "marble_funnel" and "domino_chain" disabled — enum members commented out
+    # in ScenarioCategory (ramp geometry / portrait layout need work).
     "destruction": ConceptBrief(
         pipeline="physics",
         category=ScenarioCategory.DESTRUCTION,

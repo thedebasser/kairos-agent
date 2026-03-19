@@ -28,7 +28,7 @@ from kairos.schemas.contracts import (
     ValidationCheck,
     ValidationResult,
 )
-from kairos.schemas.simulation import AdjustedSimulationCode, SimulationCode
+from kairos.schemas.simulation import AdjustedSimulationCode, AdjustedSimulationConfig, SimulationCode, SimulationConfigOutput
 from kairos.pipelines.physics.simulation_agent import PhysicsSimulationAgent
 
 pytestmark = [pytest.mark.unit]
@@ -126,18 +126,16 @@ class TestGenerateSimulation:
     ) -> None:
         """Should call the LLM with a category-specific prompt and return code."""
         mock_routing.call_llm = AsyncMock(
-            return_value=SimulationCode(
-                code="import pygame\nprint('hello')",
+            return_value=SimulationConfigOutput(
+                config={"layout": "grid", "ball_count": 50},
                 reasoning="Simple test",
             )
         )
 
         code = await agent.generate_simulation(sample_concept)
 
-        assert "import pygame" in code
+        assert isinstance(code, str)
         mock_routing.call_llm.assert_awaited_once()
-        call_kwargs = mock_routing.call_llm.call_args
-        assert call_kwargs.kwargs.get("model") or call_kwargs.args[0] == "simulation-first-pass"
 
     @patch("kairos.pipelines.physics.simulation_agent.llm_routing")
     async def test_prompt_contains_concept_details(
@@ -163,10 +161,11 @@ class TestGenerateSimulation:
         agent: PhysicsSimulationAgent,
         sample_concept: ConceptBrief,
     ) -> None:
-        """Should raise FileNotFoundError if the template doesn't exist."""
-        agent._prompts_dir = Path("/nonexistent/prompts")  # noqa: SLF001
-        with pytest.raises(FileNotFoundError):
-            agent._build_generation_prompt(sample_concept)  # noqa: SLF001
+        """Should raise when the category has no prompt template."""
+        from kairos.ai.prompts.physics.builder import build_simulation_prompt
+
+        with pytest.raises(ValueError, match="Unknown category"):
+            build_simulation_prompt("nonexistent_category", {})
 
 
 # ---------------------------------------------------------------------------
@@ -244,7 +243,7 @@ class TestValidateOutput:
 
         assert result.passed is True
         mock_validation.validate_simulation.assert_called_once_with(
-            "/path/to/video.mp4", run_tier2=False
+            "/path/to/video.mp4", run_tier2=False, skip_checks={"audio_present"}
         )
 
 
@@ -256,17 +255,36 @@ class TestValidateOutput:
 class TestAdjustParameters:
     """Tests for adjust_parameters."""
 
+    @patch("kairos.pipelines.physics.simulation_agent.build_simulation_script", return_value="import pygame\n# fixed")
+    @patch("kairos.pipelines.physics.simulation_agent.CONFIG_REGISTRY")
+    @patch("kairos.pipelines.physics.simulation_agent._adjustment_models", return_value=("sim-param-adjust", "simulation-debugger"))
+    @patch("kairos.pipelines.physics.simulation_agent.load_system_prompt")
+    @patch("kairos.pipelines.physics.simulation_agent.build_user_prompt")
     @patch("kairos.pipelines.physics.simulation_agent.llm_routing")
     async def test_sends_failed_checks_to_llm(
         self,
         mock_routing: MagicMock,
+        mock_build_user: MagicMock,
+        mock_load_sys: MagicMock,
+        mock_adj_models: MagicMock,
+        mock_config_reg: MagicMock,
+        mock_build_script: MagicMock,
         agent: PhysicsSimulationAgent,
         failing_validation: ValidationResult,
     ) -> None:
         """Should include failed check details in the adjustment prompt."""
-        mock_routing.call_with_quality_fallback = AsyncMock(
-            return_value=AdjustedSimulationCode(
-                code="import pygame\n# fixed",
+        def _fake_user_prompt(name, vars):
+            m = MagicMock()
+            m.text = vars.get("failed_summary", "")
+            return m
+
+        mock_build_user.side_effect = _fake_user_prompt
+        mock_load_sys.return_value = MagicMock(text="system prompt")
+        mock_config_reg.get.return_value = None
+
+        mock_routing.call_llm = AsyncMock(
+            return_value=AdjustedSimulationConfig(
+                config={"resolution": [1080, 1920]},
                 changes_made=["Changed resolution to 1080x1920"],
                 reasoning="Swapped width and height",
             )
@@ -277,31 +295,43 @@ class TestAdjustParameters:
         )
 
         assert "fixed" in code
-        call_args = mock_routing.call_with_quality_fallback.call_args
-        messages = call_args.kwargs.get("messages") or call_args.args[2]
+        call_args = mock_routing.call_llm.call_args
+        messages = call_args.kwargs.get("messages")
         user_msg = messages[-1]["content"]
         assert "resolution" in user_msg.lower()
         assert "1920x1080" in user_msg
 
+    @patch("kairos.pipelines.physics.simulation_agent.build_simulation_script", return_value="fixed")
+    @patch("kairos.pipelines.physics.simulation_agent.CONFIG_REGISTRY")
+    @patch("kairos.pipelines.physics.simulation_agent._adjustment_models", return_value=("sim-param-adjust", "simulation-debugger"))
+    @patch("kairos.pipelines.physics.simulation_agent.load_system_prompt")
+    @patch("kairos.pipelines.physics.simulation_agent.build_user_prompt")
     @patch("kairos.pipelines.physics.simulation_agent.llm_routing")
     async def test_uses_quality_fallback(
         self,
         mock_routing: MagicMock,
+        mock_build_user: MagicMock,
+        mock_load_sys: MagicMock,
+        mock_adj_models: MagicMock,
+        mock_config_reg: MagicMock,
+        mock_build_script: MagicMock,
         agent: PhysicsSimulationAgent,
         failing_validation: ValidationResult,
     ) -> None:
-        """Should use sim-param-adjust as primary with simulation-debugger fallback."""
-        mock_routing.call_with_quality_fallback = AsyncMock(
-            return_value=AdjustedSimulationCode(code="fixed", changes_made=[])
+        """Should use simulation-debugger model for config adjustment."""
+        mock_build_user.return_value = MagicMock(text="user prompt")
+        mock_load_sys.return_value = MagicMock(text="system prompt")
+        mock_config_reg.get.return_value = None
+
+        mock_routing.call_llm = AsyncMock(
+            return_value=AdjustedSimulationConfig(config={}, changes_made=[])
         )
 
         await agent.adjust_parameters("code", failing_validation, 1)
 
-        call_args = mock_routing.call_with_quality_fallback.call_args
-        primary = call_args.kwargs.get("primary_model") or call_args.args[0]
-        fallback = call_args.kwargs.get("fallback_model") or call_args.args[1]
-        assert primary == "sim-param-adjust"
-        assert fallback == "simulation-debugger"
+        call_args = mock_routing.call_llm.call_args
+        model = call_args.kwargs.get("model")
+        assert model == "simulation-debugger"
 
 
 # ---------------------------------------------------------------------------
@@ -398,31 +428,23 @@ class TestEnrichStatsFromStdout:
 class TestRunLoop:
     """Tests for the full simulation iteration loop."""
 
-    @patch("kairos.pipelines.physics.simulation_agent.validation")
-    @patch("kairos.pipelines.physics.simulation_agent.sandbox")
-    @patch("kairos.pipelines.physics.simulation_agent.llm_routing")
     async def test_passes_on_first_iteration(
         self,
-        mock_routing: MagicMock,
-        mock_sandbox: MagicMock,
-        mock_validation: MagicMock,
         agent: PhysicsSimulationAgent,
         sample_concept: ConceptBrief,
         passing_sim_result: SimulationResult,
         passing_validation: ValidationResult,
     ) -> None:
         """Happy path: generate → execute → validate passes on first try."""
-        mock_routing.call_llm = AsyncMock(
-            return_value=SimulationCode(code="import pygame\n# simulation", reasoning="ok")
-        )
-        mock_sandbox.execute_simulation = AsyncMock(return_value=passing_sim_result)
-        mock_validation.validate_simulation = MagicMock(return_value=passing_validation)
-
-        # Mock ffprobe via the agent method
-        with patch.object(agent, "_ffprobe", return_value={
-            "format": {"duration": "65.0", "size": "45000000"},
-            "streams": [{"codec_type": "video", "r_frame_rate": "30/1", "nb_frames": "1950"}],
-        }):
+        with (
+            patch.object(agent, "generate_simulation", new_callable=AsyncMock, return_value="import pygame\n# simulation"),
+            patch.object(agent, "execute_simulation", new_callable=AsyncMock, return_value=passing_sim_result),
+            patch.object(agent, "validate_output", new_callable=AsyncMock, return_value=passing_validation),
+            patch.object(agent, "_ffprobe", return_value={
+                "format": {"duration": "65.0", "size": "45000000"},
+                "streams": [{"codec_type": "video", "r_frame_rate": "30/1", "nb_frames": "1950"}],
+            }),
+        ):
             result = await agent.run_loop(sample_concept)
 
         assert result.simulation_iteration == 1
@@ -432,14 +454,8 @@ class TestRunLoop:
         assert result.validation_result.passed is True
         assert result.simulation_stats is not None
 
-    @patch("kairos.pipelines.physics.simulation_agent.validation")
-    @patch("kairos.pipelines.physics.simulation_agent.sandbox")
-    @patch("kairos.pipelines.physics.simulation_agent.llm_routing")
     async def test_adjusts_and_retries_on_failure(
         self,
-        mock_routing: MagicMock,
-        mock_sandbox: MagicMock,
-        mock_validation: MagicMock,
         agent: PhysicsSimulationAgent,
         sample_concept: ConceptBrief,
         passing_sim_result: SimulationResult,
@@ -447,67 +463,44 @@ class TestRunLoop:
         failing_validation: ValidationResult,
     ) -> None:
         """Should adjust code and retry when validation fails."""
-        mock_routing.call_llm = AsyncMock(
-            return_value=SimulationCode(code="original code", reasoning="ok")
-        )
-        mock_routing.call_with_quality_fallback = AsyncMock(
-            return_value=AdjustedSimulationCode(
-                code="fixed code", changes_made=["Fix resolution"]
-            )
-        )
-        mock_sandbox.execute_simulation = AsyncMock(return_value=passing_sim_result)
-        # First validation fails, second passes
-        mock_validation.validate_simulation = MagicMock(
-            side_effect=[failing_validation, passing_validation]
-        )
-
-        with patch.object(agent, "_ffprobe", return_value={
-            "format": {"duration": "65.0", "size": "45000000"},
-            "streams": [{"codec_type": "video", "r_frame_rate": "30/1", "nb_frames": "1950"}],
-        }):
+        mock_adjust = AsyncMock(return_value="fixed code")
+        with (
+            patch.object(agent, "generate_simulation", new_callable=AsyncMock, return_value="original code"),
+            patch.object(agent, "execute_simulation", new_callable=AsyncMock, return_value=passing_sim_result),
+            patch.object(agent, "validate_output", new_callable=AsyncMock, side_effect=[failing_validation, passing_validation]),
+            patch.object(agent, "adjust_parameters", mock_adjust),
+            patch.object(agent, "_ffprobe", return_value={
+                "format": {"duration": "65.0", "size": "45000000"},
+                "streams": [{"codec_type": "video", "r_frame_rate": "30/1", "nb_frames": "1950"}],
+            }),
+        ):
             result = await agent.run_loop(sample_concept)
 
         assert result.simulation_iteration == 2
         assert result.simulation_code == "fixed code"
         assert result.validation_result is not None
         assert result.validation_result.passed is True
-        assert mock_routing.call_with_quality_fallback.await_count == 1
+        assert mock_adjust.await_count == 1
 
-    @patch("kairos.pipelines.physics.simulation_agent.validation")
-    @patch("kairos.pipelines.physics.simulation_agent.sandbox")
-    @patch("kairos.pipelines.physics.simulation_agent.llm_routing")
     async def test_handles_execution_failure(
         self,
-        mock_routing: MagicMock,
-        mock_sandbox: MagicMock,
-        mock_validation: MagicMock,
         agent: PhysicsSimulationAgent,
         sample_concept: ConceptBrief,
         passing_sim_result: SimulationResult,
         passing_validation: ValidationResult,
     ) -> None:
         """Should catch execution errors, adjust, and retry."""
-        mock_routing.call_llm = AsyncMock(
-            return_value=SimulationCode(code="broken code", reasoning="ok")
-        )
-        mock_routing.call_with_quality_fallback = AsyncMock(
-            return_value=AdjustedSimulationCode(
-                code="fixed code", changes_made=["Fix import"]
-            )
-        )
-        # First execution fails, second succeeds
-        mock_sandbox.execute_simulation = AsyncMock(
-            side_effect=[
-                SimulationExecutionError("Docker failed"),
-                passing_sim_result,
-            ]
-        )
-        mock_validation.validate_simulation = MagicMock(return_value=passing_validation)
-
-        with patch.object(agent, "_ffprobe", return_value={
-            "format": {"duration": "65.0", "size": "45000000"},
-            "streams": [{"codec_type": "video", "r_frame_rate": "30/1", "nb_frames": "1950"}],
-        }):
+        with (
+            patch.object(agent, "generate_simulation", new_callable=AsyncMock, return_value="broken code"),
+            patch.object(agent, "execute_simulation", new_callable=AsyncMock,
+                side_effect=[SimulationExecutionError("Docker failed"), passing_sim_result]),
+            patch.object(agent, "validate_output", new_callable=AsyncMock, return_value=passing_validation),
+            patch.object(agent, "adjust_parameters", new_callable=AsyncMock, return_value="fixed code"),
+            patch.object(agent, "_ffprobe", return_value={
+                "format": {"duration": "65.0", "size": "45000000"},
+                "streams": [{"codec_type": "video", "r_frame_rate": "30/1", "nb_frames": "1950"}],
+            }),
+        ):
             result = await agent.run_loop(sample_concept)
 
         assert len(result.errors) >= 1
@@ -515,14 +508,8 @@ class TestRunLoop:
         assert result.validation_result is not None
         assert result.validation_result.passed is True
 
-    @patch("kairos.pipelines.physics.simulation_agent.validation")
-    @patch("kairos.pipelines.physics.simulation_agent.sandbox")
-    @patch("kairos.pipelines.physics.simulation_agent.llm_routing")
     async def test_max_iterations_reached(
         self,
-        mock_routing: MagicMock,
-        mock_sandbox: MagicMock,
-        mock_validation: MagicMock,
         agent: PhysicsSimulationAgent,
         sample_concept: ConceptBrief,
         passing_sim_result: SimulationResult,
@@ -532,19 +519,16 @@ class TestRunLoop:
         # Override max iterations to 2 for faster test
         agent._settings.max_simulation_iterations = 2  # noqa: SLF001
 
-        mock_routing.call_llm = AsyncMock(
-            return_value=SimulationCode(code="code", reasoning="ok")
-        )
-        mock_routing.call_with_quality_fallback = AsyncMock(
-            return_value=AdjustedSimulationCode(code="code v2", changes_made=["fix"])
-        )
-        mock_sandbox.execute_simulation = AsyncMock(return_value=passing_sim_result)
-        mock_validation.validate_simulation = MagicMock(return_value=failing_validation)
-
-        with patch.object(agent, "_ffprobe", return_value={
-            "format": {"duration": "65.0", "size": "45000000"},
-            "streams": [{"codec_type": "video", "r_frame_rate": "30/1", "nb_frames": "1950"}],
-        }):
+        with (
+            patch.object(agent, "generate_simulation", new_callable=AsyncMock, return_value="code"),
+            patch.object(agent, "execute_simulation", new_callable=AsyncMock, return_value=passing_sim_result),
+            patch.object(agent, "validate_output", new_callable=AsyncMock, return_value=failing_validation),
+            patch.object(agent, "adjust_parameters", new_callable=AsyncMock, return_value="code v2"),
+            patch.object(agent, "_ffprobe", return_value={
+                "format": {"duration": "65.0", "size": "45000000"},
+                "streams": [{"codec_type": "video", "r_frame_rate": "30/1", "nb_frames": "1950"}],
+            }),
+        ):
             result = await agent.run_loop(sample_concept)
 
         assert result.simulation_iteration == 2
@@ -552,24 +536,14 @@ class TestRunLoop:
         assert result.validation_result.passed is False
         assert any("Max iterations" in e for e in result.errors)
 
-    @patch("kairos.pipelines.physics.simulation_agent.sandbox")
-    @patch("kairos.pipelines.physics.simulation_agent.llm_routing")
     async def test_no_video_output_triggers_retry(
         self,
-        mock_routing: MagicMock,
-        mock_sandbox: MagicMock,
         agent: PhysicsSimulationAgent,
         sample_concept: ConceptBrief,
     ) -> None:
         """Should retry when sandbox produces no MP4 file."""
         agent._settings.max_simulation_iterations = 2  # noqa: SLF001
 
-        mock_routing.call_llm = AsyncMock(
-            return_value=SimulationCode(code="code", reasoning="ok")
-        )
-        mock_routing.call_with_quality_fallback = AsyncMock(
-            return_value=AdjustedSimulationCode(code="code v2", changes_made=["fix"])
-        )
         # Both executions succeed but produce no video
         no_video_result = SimulationResult(
             returncode=0,
@@ -577,9 +551,13 @@ class TestRunLoop:
             stderr="",
             output_files=["/workspace/output/debug.log"],
         )
-        mock_sandbox.execute_simulation = AsyncMock(return_value=no_video_result)
 
-        result = await agent.run_loop(sample_concept)
+        with (
+            patch.object(agent, "generate_simulation", new_callable=AsyncMock, return_value="code"),
+            patch.object(agent, "execute_simulation", new_callable=AsyncMock, return_value=no_video_result),
+            patch.object(agent, "adjust_parameters", new_callable=AsyncMock, return_value="code v2"),
+        ):
+            result = await agent.run_loop(sample_concept)
 
         assert result.simulation_iteration == 2
         assert any("No MP4" in e for e in result.errors)

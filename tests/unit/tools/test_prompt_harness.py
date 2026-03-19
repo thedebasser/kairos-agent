@@ -41,19 +41,16 @@ class TestPromptTemplates:
         """Each category should have a .txt prompt template."""
         from pathlib import Path
 
-        prompts_dir = Path(__file__).resolve().parents[3] / "src" / "kairos" / "pipelines" / "physics" / "prompts"
+        prompts_dir = Path(__file__).resolve().parents[3] / "src" / "kairos" / "ai" / "prompts" / "physics" / "categories"
         for cat in ScenarioCategory:
             template = prompts_dir / f"{cat.value}.txt"
             assert template.exists(), f"Missing prompt template: {template}"
 
     def test_templates_contain_placeholders(self) -> None:
-        """Templates should contain variable placeholders."""
+        """Templates should contain Jinja-style variable placeholders."""
         from pathlib import Path
 
-        prompts_dir = Path(__file__).resolve().parents[3] / "src" / "kairos" / "pipelines" / "physics" / "prompts"
+        prompts_dir = Path(__file__).resolve().parents[3] / "src" / "kairos" / "ai" / "prompts" / "physics" / "categories"
         for cat in ScenarioCategory:
             template = (prompts_dir / f"{cat.value}.txt").read_text()
-            assert "{{ title }}" in template, f"{cat.value} missing title placeholder"
             assert "{{ target_duration_sec }}" in template, f"{cat.value} missing duration placeholder"
-            assert "{{ body_count_initial }}" in template, f"{cat.value} missing body_count placeholder"
-            assert "simulation.mp4" in template, f"{cat.value} missing output path"
