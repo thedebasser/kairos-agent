@@ -1,0 +1,29 @@
+<div class="event-feed">
+  <div class="feed-header">
+    <h2>Live Event Feed</h2>
+    <div class="feed-controls">
+      <span class="connection-status" [class.active]="connected">
+        {{ connected ? '● Connected' : '○ Disconnected' }}
+      </span>
+      <button (click)="clearEvents()" class="clear-btn" *ngIf="events.length">
+        Clear
+      </button>
+    </div>
+  </div>
+
+  <div #feedContainer class="feed-container">
+    <div
+      *ngFor="let ev of events; trackBy: trackEvent"
+      class="feed-event"
+      [ngClass]="eventColor(ev.event_type)"
+    >
+      <span class="ev-time">{{ formatTime(ev.timestamp) }}</span>
+      <span class="ev-type">{{ ev.event_type }}</span>
+      <span class="ev-run">{{ ev.run_id.slice(0, 8) }}</span>
+    </div>
+
+    <div *ngIf="!events.length" class="empty-feed">
+      Waiting for events…
+    </div>
+  </div>
+</div>

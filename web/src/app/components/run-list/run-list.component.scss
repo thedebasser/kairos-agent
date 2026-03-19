@@ -1,0 +1,137 @@
+.run-list {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+.list-header {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+
+  h1 {
+    margin: 0;
+    font-size: 1.5rem;
+    color: #e0e0e0;
+  }
+
+  .run-count {
+    color: #888;
+    font-size: 0.9rem;
+  }
+}
+
+.error-banner {
+  background: #2d1b1b;
+  border: 1px solid #c62828;
+  color: #ef9a9a;
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+}
+
+.loading {
+  color: #888;
+  padding: 2rem;
+  text-align: center;
+}
+
+.run-table {
+  width: 100%;
+  border-collapse: collapse;
+
+  th, td {
+    padding: 0.6rem 1rem;
+    text-align: left;
+    border-bottom: 1px solid #2a2a3a;
+  }
+
+  th {
+    color: #888;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .clickable {
+    cursor: pointer;
+    transition: background 0.15s;
+
+    &:hover {
+      background: #1e1e2e;
+    }
+  }
+
+  .mono {
+    font-family: 'Fira Code', 'Consolas', monospace;
+    font-size: 0.85rem;
+    color: #64b5f6;
+  }
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.2rem 0.6rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.badge-running {
+  background: #1a237e;
+  color: #90caf9;
+}
+
+.badge-success {
+  background: #1b5e20;
+  color: #a5d6a7;
+}
+
+.badge-error {
+  background: #b71c1c;
+  color: #ef9a9a;
+}
+
+.badge-default {
+  background: #37474f;
+  color: #b0bec5;
+}
+
+.empty {
+  color: #666;
+  text-align: center;
+  padding: 3rem;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 1.5rem;
+
+  button {
+    background: #2a2a3a;
+    color: #e0e0e0;
+    border: 1px solid #444;
+    padding: 0.4rem 1rem;
+    border-radius: 4px;
+    cursor: pointer;
+
+    &:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    &:hover:not(:disabled) {
+      background: #3a3a4a;
+    }
+  }
+
+  span {
+    color: #888;
+    font-size: 0.85rem;
+  }
+}

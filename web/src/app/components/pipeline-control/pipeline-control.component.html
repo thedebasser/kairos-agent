@@ -1,0 +1,22 @@
+<div class="pipeline-control">
+  <h2>Launch Pipeline</h2>
+
+  <div *ngIf="error" class="error-banner">{{ error }}</div>
+  <div *ngIf="success" class="success-banner">{{ success }}</div>
+
+  <div class="control-row">
+    <label for="pipeline-select">Pipeline</label>
+    <select id="pipeline-select" [(ngModel)]="selectedPipeline">
+      <option *ngFor="let p of availablePipelines" [value]="p">{{ p }}</option>
+    </select>
+
+    <button
+      (click)="startPipeline()"
+      [disabled]="starting"
+      class="start-btn"
+    >
+      <span *ngIf="!starting">▶ Start</span>
+      <span *ngIf="starting">Starting…</span>
+    </button>
+  </div>
+</div>

@@ -1,0 +1,17 @@
+<div class="app-shell">
+  <nav class="top-nav">
+    <a routerLink="/" class="brand">Kairos</a>
+    <span class="nav-sep">|</span>
+    <a routerLink="/" class="nav-link">Runs</a>
+  </nav>
+
+  <div class="main-layout">
+    <aside class="sidebar">
+      <app-pipeline-control></app-pipeline-control>
+      <app-event-feed></app-event-feed>
+    </aside>
+    <main class="content">
+      <router-outlet></router-outlet>
+    </main>
+  </div>
+</div>

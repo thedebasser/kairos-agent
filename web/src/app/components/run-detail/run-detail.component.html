@@ -1,0 +1,101 @@
+<div class="run-detail" *ngIf="!loading; else loadingBlock">
+  <div *ngIf="error" class="error-banner">{{ error }}</div>
+
+  <div *ngIf="run" class="content">
+    <!-- Header -->
+    <div class="detail-header">
+      <a routerLink="/" class="back-link">← Back to runs</a>
+      <div class="title-row">
+        <h1>{{ run.concept_title || 'Run ' + shortId(run.pipeline_run_id) }}</h1>
+        <span class="badge" [ngClass]="statusClass(run.status)">{{ run.status }}</span>
+        <span *ngIf="liveConnected" class="live-indicator">● LIVE</span>
+      </div>
+    </div>
+
+    <!-- Meta -->
+    <div class="meta-grid">
+      <div class="meta-item">
+        <span class="meta-label">Run ID</span>
+        <span class="meta-value mono">{{ run.pipeline_run_id }}</span>
+      </div>
+      <div class="meta-item">
+        <span class="meta-label">Pipeline</span>
+        <span class="meta-value">{{ run.pipeline }}</span>
+      </div>
+      <div class="meta-item">
+        <span class="meta-label">Duration</span>
+        <span class="meta-value">{{ formatDuration(run.total_duration_ms) }}</span>
+      </div>
+      <div class="meta-item">
+        <span class="meta-label">Cost</span>
+        <span class="meta-value">{{ formatCost(run.total_cost_usd) }}</span>
+      </div>
+      <div class="meta-item">
+        <span class="meta-label">LLM Calls</span>
+        <span class="meta-value">{{ run.total_llm_calls ?? '—' }}</span>
+      </div>
+      <div class="meta-item" *ngIf="run.final_video_path">
+        <span class="meta-label">Video</span>
+        <span class="meta-value mono">{{ run.final_video_path }}</span>
+      </div>
+    </div>
+
+    <!-- Errors -->
+    <div *ngIf="run.errors.length" class="errors-section">
+      <h2>Errors</h2>
+      <div *ngFor="let err of run.errors" class="error-item">{{ err }}</div>
+    </div>
+
+    <!-- Steps -->
+    <div *ngIf="run.steps.length" class="steps-section">
+      <h2>Steps</h2>
+      <table class="steps-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Step</th>
+            <th>Attempt</th>
+            <th>Status</th>
+            <th>Duration</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let step of run.steps">
+            <td>{{ step.step_number }}</td>
+            <td>{{ step.step }}</td>
+            <td>{{ step.attempt }}</td>
+            <td>
+              <span class="step-icon" [ngClass]="statusClass(step.status)">
+                {{ stepStatusIcon(step.status) }}
+              </span>
+              {{ step.status }}
+            </td>
+            <td>{{ formatDuration(step.duration_ms) }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Events -->
+    <div class="events-section">
+      <h2>
+        Events
+        <span class="event-count">({{ events.length }})</span>
+      </h2>
+      <div class="event-list" *ngIf="events.length; else noEvents">
+        <div *ngFor="let ev of events; trackBy: trackEvent" class="event-row">
+          <span class="event-time">{{ formatTimestamp(ev.timestamp) }}</span>
+          <span class="event-type badge badge-default">{{ ev.event_type }}</span>
+          <span class="event-id mono">{{ shortId(ev.event_id) }}</span>
+        </div>
+      </div>
+      <ng-template #noEvents>
+        <p class="empty">No events recorded.</p>
+      </ng-template>
+    </div>
+  </div>
+</div>
+
+<ng-template #loadingBlock>
+  <p class="loading">Loading run details…</p>
+</ng-template>

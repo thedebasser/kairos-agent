@@ -1,0 +1,72 @@
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.top-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 1.5rem;
+  background: #12121e;
+  border-bottom: 1px solid #2a2a3a;
+
+  .brand {
+    font-size: 1.1rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #64b5f6;
+    text-decoration: none;
+  }
+
+  .nav-sep {
+    color: #444;
+  }
+
+  .nav-link {
+    color: #888;
+    font-size: 0.85rem;
+    text-decoration: none;
+
+    &:hover {
+      color: #e0e0e0;
+    }
+  }
+}
+
+.main-layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.sidebar {
+  width: 340px;
+  min-width: 340px;
+  padding: 1rem;
+  border-right: 1px solid #2a2a3a;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.content {
+  flex: 1;
+  overflow-y: auto;
+}
+
+@media (max-width: 900px) {
+  .main-layout {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    width: 100%;
+    min-width: unset;
+    border-right: none;
+    border-bottom: 1px solid #2a2a3a;
+  }
+}

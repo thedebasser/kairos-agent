@@ -1,0 +1,43 @@
+<div class="run-list">
+  <header class="list-header">
+    <h1>Pipeline Runs</h1>
+    <span class="run-count" *ngIf="!loading">{{ total }} total</span>
+  </header>
+
+  <div class="error-banner" *ngIf="error">{{ error }}</div>
+
+  <div class="loading" *ngIf="loading">Loading runs...</div>
+
+  <table class="run-table" *ngIf="!loading && runs.length > 0">
+    <thead>
+      <tr>
+        <th>Run ID</th>
+        <th>Pipeline</th>
+        <th>Status</th>
+        <th>Started</th>
+        <th>Duration</th>
+        <th>Cost</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr *ngFor="let run of runs" [routerLink]="['/runs', run.pipeline_run_id]" class="clickable">
+        <td class="mono">{{ run.pipeline_run_id | slice:0:12 }}</td>
+        <td>{{ run.pipeline }}</td>
+        <td><span class="badge" [ngClass]="statusClass(run.status)">{{ run.status }}</span></td>
+        <td>{{ formatDate(run.started_at) }}</td>
+        <td>{{ formatDuration(run.total_duration_ms) }}</td>
+        <td>{{ formatCost(run.total_cost_usd) }}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="empty" *ngIf="!loading && runs.length === 0">
+    No pipeline runs found. Start one from the Pipeline Control panel.
+  </div>
+
+  <div class="pagination" *ngIf="totalPages > 1">
+    <button (click)="prevPage()" [disabled]="page === 0">Previous</button>
+    <span>Page {{ page + 1 }} of {{ totalPages }}</span>
+    <button (click)="nextPage()" [disabled]="page >= totalPages - 1">Next</button>
+  </div>
+</div>
