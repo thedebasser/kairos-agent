@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from kairos.services.llm_routing import _check_context_budget
+from kairos.ai.llm.routing import _check_context_budget
 
 # Patch targets — the function uses local imports from litellm
 _TC = "litellm.token_counter"

@@ -13,7 +13,7 @@ implementation that answers questions like:
 
 **Usage**::
 
-    from kairos.services.model_capabilities import get_capabilities
+    from kairos.ai.llm.capabilities import get_capabilities
 
     caps = get_capabilities("ollama/qwen3.5:27b")
     if caps.supports_thinking:
@@ -195,7 +195,7 @@ class AnthropicCapabilities(ModelCapabilities):
         return True
 
     def get_thinking_param(self) -> dict[str, Any] | None:
-        from kairos.services.llm_config import get_thinking_config
+        from kairos.ai.llm.config import get_thinking_config
         return get_thinking_config()
 
     def extract_thinking(self, response: Any) -> str | None:

@@ -17,7 +17,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kairos.services.monitoring import Alert, AlertManager, MetricsStore
+from kairos.ai.tracing.sinks.langfuse_sink import Alert, AlertManager, MetricsStore
 
 
 @pytest.fixture()

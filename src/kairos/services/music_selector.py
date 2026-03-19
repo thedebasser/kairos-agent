@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from kairos.config import get_settings
-from kairos.models.contracts import ConceptBrief, MusicTrackMetadata, SimulationStats
+from kairos.schemas.contracts import ConceptBrief, MusicTrackMetadata, SimulationStats
 
 logger = logging.getLogger(__name__)
 

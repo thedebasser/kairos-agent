@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from kairos.models.contracts import (
+from kairos.schemas.contracts import (
     CategoryKnowledge,
     FailedCheck,
     PastFix,
@@ -25,7 +25,7 @@ from kairos.models.contracts import (
     ValidationResult,
 )
 from kairos.services.ast_extractor import ExtractedParameters, extract_parameters
-from kairos.services.learning_loop import (
+from kairos.ai.learning.learning_loop import (
     build_validation_feedback,
     format_few_shot_prompt,
     get_validation_rules_prompt,
@@ -313,7 +313,7 @@ class TestLearningLoopEnabled:
     @pytest.mark.asyncio
     async def test_disabled_skips_record(self):
         """When learning_loop_enabled=False, record_training_example is a no-op."""
-        from kairos.services.learning_loop import record_training_example
+        from kairos.ai.learning.learning_loop import record_training_example
 
         mock_settings = MagicMock()
         mock_settings.learning_loop_enabled = False
@@ -332,7 +332,7 @@ class TestLearningLoopEnabled:
     @pytest.mark.asyncio
     async def test_enabled_attempts_record(self):
         """When learning_loop_enabled=True, record_training_example tries DB."""
-        from kairos.services.learning_loop import record_training_example
+        from kairos.ai.learning.learning_loop import record_training_example
 
         mock_settings = MagicMock()
         mock_settings.learning_loop_enabled = True
@@ -359,7 +359,7 @@ class TestVerifiedGate:
     @pytest.mark.asyncio
     async def test_returns_empty_without_db(self):
         """Without a real DB, get_few_shot_examples returns []."""
-        from kairos.services.learning_loop import get_few_shot_examples
+        from kairos.ai.learning.learning_loop import get_few_shot_examples
 
         result = await get_few_shot_examples("physics", "ball_pit")
         assert result == []

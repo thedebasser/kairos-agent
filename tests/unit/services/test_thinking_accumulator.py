@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from kairos.services.llm_routing import (
+from kairos.ai.llm.routing import (
     _accumulate_thinking,
     _thinking_buffer,
     collect_thinking,

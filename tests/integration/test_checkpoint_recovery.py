@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langgraph.checkpoint.memory import MemorySaver
 
-from kairos.models.contracts import (
+from kairos.schemas.contracts import (
     AudioBrief,
     Caption,
     CaptionSet,
@@ -32,7 +32,7 @@ from kairos.models.contracts import (
     ValidationResult,
     VideoOutput,
 )
-from kairos.pipeline.graph import compile_pipeline
+from kairos.orchestrator.graph import compile_pipeline
 
 pytestmark = [pytest.mark.integration]
 

@@ -16,7 +16,7 @@ import uuid
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from kairos.models.contracts import ReviewAction
+from kairos.schemas.contracts import ReviewAction
 from kairos.web.review_app import create_review_app
 
 pytestmark = pytest.mark.unit

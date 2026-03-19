@@ -1,6 +1,6 @@
 """Kairos Agent — Physics Simulation Agent.
 
-Implements BaseSimulationAgent for the Pygame + Pymunk physics pipeline.
+Implements SimulationAgent for the Pygame + Pymunk physics pipeline.
 Orchestrates: config generation → template injection → sandbox execution
 → validation → adjustment.
 
@@ -27,14 +27,14 @@ import subprocess
 import time
 from typing import Any
 
-from kairos.agents.base import BaseSimulationAgent
+from kairos.pipelines.contracts import SimulationAgent
 from kairos.config import get_settings
 from kairos.exceptions import (
     SimulationExecutionError,
     SimulationOOMError,
     SimulationTimeoutError,
 )
-from kairos.models.contracts import (
+from kairos.schemas.contracts import (
     AgentRunStatus,
     ConceptBrief,
     PipelineStatus,
@@ -43,18 +43,18 @@ from kairos.models.contracts import (
     SimulationStats,
     ValidationResult,
 )
-from kairos.models.simulation import (
+from kairos.schemas.simulation import (
     AdjustedSimulationConfig,
     SimulationConfigOutput,
 )
 from kairos.pipelines.physics.configs import CONFIG_REGISTRY
 from kairos.pipelines.physics.template_loader import build_simulation_script
-from kairos.pipelines.physics.prompts.builder import (
+from kairos.ai.prompts.physics.builder import (
     build_user_prompt,
     load_system_prompt,
 )
 from kairos.services import llm_routing, sandbox, validation
-from kairos.services.llm_config import get_step_config
+from kairos.ai.llm.config import get_step_config
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +75,7 @@ _COMPLETION_RE = re.compile(r"COMPLETION_RATIO[=:]?\s*([\d.]+)")
 _FALLEN_RE = re.compile(r"FALLEN[=:]?\s*(\d+)/(\d+)")
 
 
-class PhysicsSimulationAgent(BaseSimulationAgent):
+class PhysicsSimulationAgent(SimulationAgent):
     """Simulation agent for the *Oddly Satisfying Physics* pipeline.
 
     Uses the config-based template architecture:
@@ -139,7 +139,7 @@ class PhysicsSimulationAgent(BaseSimulationAgent):
         # --- Learning loop: assemble extra context for the prompt ---
         extra_context_parts: list[str] = []
         try:
-            from kairos.services.learning_loop import (
+            from kairos.ai.learning.learning_loop import (
                 format_few_shot_prompt,
                 get_category_knowledge_for_prompt,
                 get_few_shot_examples,
@@ -293,7 +293,7 @@ class PhysicsSimulationAgent(BaseSimulationAgent):
         # --- Learning loop: structured feedback + AST analysis ---
         extra_adjustment_context = ""
         try:
-            from kairos.services.learning_loop import build_validation_feedback
+            from kairos.ai.learning.learning_loop import build_validation_feedback
             from kairos.services.ast_extractor import extract_parameters
 
             # Structured feedback with quantitative deltas & urgency
@@ -530,7 +530,7 @@ class PhysicsSimulationAgent(BaseSimulationAgent):
                     result.errors.append(f"Completion check failed: {completion_msg}")
                     break
                 # Create a synthetic validation failure for the adjustment LLM
-                from kairos.models.contracts import ValidationCheck
+                from kairos.schemas.contracts import ValidationCheck
                 fake_check = ValidationCheck(
                     name="completion_ratio",
                     passed=False,
@@ -602,7 +602,7 @@ class PhysicsSimulationAgent(BaseSimulationAgent):
             "target_duration_sec": str(concept.target_duration_sec),
             "seed": str(concept.seed or 42),
         }
-        from kairos.pipelines.physics.prompts.builder import build_simulation_prompt
+        from kairos.ai.prompts.physics.builder import build_simulation_prompt
         return build_simulation_prompt(concept.category.value, variables).text
 
     @staticmethod

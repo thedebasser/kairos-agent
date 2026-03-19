@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from kairos.models.contracts import (
+from kairos.schemas.contracts import (
     AudioBrief,
     EnergyLevel,
     ScenarioCategory,

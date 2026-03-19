@@ -1,6 +1,6 @@
 """Marble Idea Agent.
 
-Implements BaseIdeaAgent for the Blender marble course pipeline.
+Implements IdeaAgent for the Blender marble course pipeline.
 
 Uses LLM to select an archetype and generate a MarbleCourseConfig,
 then converts it to a ConceptBrief for the shared graph.
@@ -14,9 +14,9 @@ import random
 from typing import Any
 from uuid import uuid4
 
-from kairos.agents.base import BaseIdeaAgent
+from kairos.pipelines.contracts import IdeaAgent
 from kairos.exceptions import ConceptGenerationError
-from kairos.models.contracts import (
+from kairos.schemas.contracts import (
     AudioBrief,
     ConceptBrief,
     EnergyLevel,
@@ -26,8 +26,8 @@ from kairos.models.contracts import (
     SimulationRequirements,
 )
 from kairos.pipelines.marble.models import MarbleCourseConfig
-from kairos.services.llm_config import get_step_config
-from kairos.services.llm_routing import call_llm
+from kairos.ai.llm.config import get_step_config
+from kairos.ai.llm.routing import call_llm
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +73,7 @@ Output ONLY valid JSON matching this schema:
 """
 
 
-class MarbleIdeaAgent(BaseIdeaAgent):
+class MarbleIdeaAgent(IdeaAgent):
     """Idea Agent for the Blender marble course pipeline.
 
     Selects an archetype (programmatic rotation or forced), then uses

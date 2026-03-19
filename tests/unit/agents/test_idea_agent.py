@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from kairos.models.contracts import (
+from kairos.schemas.contracts import (
     AudioBrief,
     ConceptBrief,
     EnergyLevel,
@@ -25,7 +25,7 @@ from kairos.models.contracts import (
     ScenarioCategory,
     SimulationRequirements,
 )
-from kairos.models.idea import (
+from kairos.schemas.idea import (
     CategoryReport,
     CategorySelection,
     ConceptDeveloperResponse,
@@ -631,17 +631,17 @@ class TestAdapterIntegration:
 
     def test_adapter_returns_idea_agent(self):
         """Adapter's get_idea_agent returns a PhysicsIdeaAgent."""
-        from kairos.pipelines.physics.adapter import PhysicsPipelineAdapter
+        from kairos.pipelines.adapters.physics_adapter import PhysicsPipelineAdapter
 
         adapter = PhysicsPipelineAdapter()
         agent = adapter.get_idea_agent()
         assert isinstance(agent, PhysicsIdeaAgent)
 
     def test_agent_is_base_idea_agent(self):
-        """Returned agent is a BaseIdeaAgent subclass."""
-        from kairos.agents.base import BaseIdeaAgent
-        from kairos.pipelines.physics.adapter import PhysicsPipelineAdapter
+        """Returned agent is a IdeaAgent subclass."""
+        from kairos.pipelines.contracts import IdeaAgent
+        from kairos.pipelines.adapters.physics_adapter import PhysicsPipelineAdapter
 
         adapter = PhysicsPipelineAdapter()
         agent = adapter.get_idea_agent()
-        assert isinstance(agent, BaseIdeaAgent)
+        assert isinstance(agent, IdeaAgent)

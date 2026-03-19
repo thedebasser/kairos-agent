@@ -25,7 +25,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.responses import FileResponse
 
 from kairos.config import get_settings
-from kairos.models.contracts import ReviewAction
+from kairos.schemas.contracts import ReviewAction
 
 logger = logging.getLogger(__name__)
 
@@ -207,7 +207,7 @@ def create_review_app() -> FastAPI:
     async def api_resume(pipeline_run_id: str):
         """Resume a failed pipeline from its last checkpoint."""
         try:
-            from kairos.pipeline.graph import resume_pipeline
+            from kairos.orchestrator.graph import resume_pipeline
 
             final_state = await resume_pipeline(pipeline_run_id)
             return {
@@ -223,7 +223,7 @@ def create_review_app() -> FastAPI:
     async def api_restart(pipeline_run_id: str):
         """Restart a failed pipeline entirely from scratch."""
         try:
-            from kairos.pipeline.graph import run_pipeline
+            from kairos.orchestrator.graph import run_pipeline
 
             # Look up original pipeline name
             pipeline_name = "physics"  # default

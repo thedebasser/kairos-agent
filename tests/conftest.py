@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from kairos.models.contracts import (
+from kairos.schemas.contracts import (
     AudioBrief,
     Caption,
     CaptionSet,

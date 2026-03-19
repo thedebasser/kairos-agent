@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from kairos.models.contracts import (
+from kairos.schemas.contracts import (
     AudioBrief,
     Caption,
     CaptionSet,
@@ -41,7 +41,7 @@ from kairos.exceptions import (
     SimulationExecutionError,
     VideoAssemblyError,
 )
-from kairos.pipeline.graph import (
+from kairos.orchestrator.graph import (
     MAX_CONCEPT_ATTEMPTS,
     MAX_SIMULATION_ITERATIONS,
     _dict_to_pipeline_state,

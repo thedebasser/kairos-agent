@@ -21,15 +21,15 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from kairos.agents.base import BaseVideoReviewAgent
-from kairos.models.contracts import (
+from kairos.pipelines.contracts import VideoReviewAgent as _VideoReviewAgentBase
+from kairos.schemas.contracts import (
     ConceptBrief,
     ReviewIssue,
     ReviewIssueSeverity,
     VideoReviewResult,
 )
-from kairos.services.llm_config import get_step_config
-from kairos.services.llm_routing import _record_llm_call
+from kairos.ai.llm.config import get_step_config
+from kairos.ai.llm.routing import _record_llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -208,7 +208,7 @@ def _parse_review_response(raw_text: str, model_used: str) -> VideoReviewResult:
     )
 
 
-class VideoReviewAgent(BaseVideoReviewAgent):
+class VideoReviewAgent(_VideoReviewAgentBase):
     """Concrete Video Review Agent using Qwen3-VL via Ollama.
 
     Default: Qwen3-VL-8B-Instruct reviews all clips.
@@ -332,7 +332,7 @@ class VideoReviewAgent(BaseVideoReviewAgent):
         # ── Structured Output Retry Loop ──────────────────────────────
         # Ask → Validate JSON → If invalid, retry with correction → Fail with reason
         import time as _time
-        from kairos.services.llm_routing import call_ollama_direct
+        from kairos.ai.llm.routing import call_ollama_direct
 
         MAX_STRUCTURED_RETRIES = 2
         result: VideoReviewResult | None = None
@@ -543,7 +543,7 @@ class VideoReviewAgent(BaseVideoReviewAgent):
         messages.append({"role": "user", "content": image_content})
 
         import time as _time
-        from kairos.services.llm_routing import call_ollama_direct
+        from kairos.ai.llm.routing import call_ollama_direct
 
         vlm_start = _time.monotonic()
         try:

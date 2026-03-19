@@ -19,7 +19,7 @@ import subprocess
 from pathlib import Path
 
 from kairos.config import get_settings
-from kairos.models.contracts import (
+from kairos.schemas.contracts import (
     Caption,
     CaptionSet,
     MusicTrackMetadata,

@@ -1,6 +1,6 @@
 """Unit tests for the Physics Video Editor Agent.
 
-Tests all four BaseVideoEditorAgent methods:
+Tests all four VideoEditorAgent methods:
 - select_music() — programmatic music selection
 - generate_captions() — LLM-powered hook caption generation
 - generate_title() — LLM-powered title generation
@@ -21,7 +21,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from kairos.exceptions import VideoAssemblyError
-from kairos.models.contracts import (
+from kairos.schemas.contracts import (
     AudioBrief,
     Caption,
     CaptionSet,
@@ -34,7 +34,7 @@ from kairos.models.contracts import (
     SimulationStats,
     VideoOutput,
 )
-from kairos.models.video_editor import HookCaptionResponse, VideoTitleResponse
+from kairos.schemas.video_editor import HookCaptionResponse, VideoTitleResponse
 from kairos.pipelines.physics.video_editor_agent import (
     CAPTION_WRITER_MODEL,
     TITLE_WRITER_MODEL,
@@ -785,16 +785,16 @@ class TestAdapterIntegration:
     """Tests that the adapter returns PhysicsVideoEditorAgent."""
 
     def test_adapter_returns_video_editor_agent(self):
-        from kairos.pipelines.physics.adapter import PhysicsPipelineAdapter
+        from kairos.pipelines.adapters.physics_adapter import PhysicsPipelineAdapter
 
         adapter = PhysicsPipelineAdapter()
         agent = adapter.get_video_editor_agent()
         assert isinstance(agent, PhysicsVideoEditorAgent)
 
     def test_agent_is_base_video_editor_agent(self):
-        from kairos.agents.base import BaseVideoEditorAgent
-        from kairos.pipelines.physics.adapter import PhysicsPipelineAdapter
+        from kairos.pipelines.contracts import VideoEditorAgent
+        from kairos.pipelines.adapters.physics_adapter import PhysicsPipelineAdapter
 
         adapter = PhysicsPipelineAdapter()
         agent = adapter.get_video_editor_agent()
-        assert isinstance(agent, BaseVideoEditorAgent)
+        assert isinstance(agent, VideoEditorAgent)

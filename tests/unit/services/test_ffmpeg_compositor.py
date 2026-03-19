@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kairos.models.contracts import Caption, CaptionSet, CaptionType
+from kairos.schemas.contracts import Caption, CaptionSet, CaptionType
 
 
 # ---------------------------------------------------------------------------

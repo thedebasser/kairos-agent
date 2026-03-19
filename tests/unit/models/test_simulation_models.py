@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from kairos.models.simulation import AdjustedSimulationCode, SimulationCode
+from kairos.schemas.simulation import AdjustedSimulationCode, SimulationCode
 
 pytestmark = [pytest.mark.unit]
 

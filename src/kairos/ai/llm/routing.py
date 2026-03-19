@@ -24,8 +24,8 @@ import yaml
 from dotenv import load_dotenv
 from pydantic import BaseModel
 
-from kairos.services.model_capabilities import get_capabilities, ModelType
-from kairos.services.monitoring import trace_llm_call
+from kairos.ai.llm.capabilities import get_capabilities, ModelType
+from kairos.ai.tracing.sinks.langfuse_sink import trace_llm_call
 
 # Ensure .env is loaded (API keys etc.)
 load_dotenv()
@@ -539,7 +539,7 @@ async def call_llm_code(
     import re as _re
 
     # ── Cache check ─────────────────────────────────────────────────
-    from kairos.services.response_cache import get_cache
+    from kairos.ai.llm.cache import get_cache
     cache = get_cache()
     if cache and cache_step:
         cached = cache.get_llm(cache_step, model, messages)
@@ -738,7 +738,7 @@ async def call_llm(
         Parsed and validated Pydantic model instance.
     """
     # ── Cache check ─────────────────────────────────────────────────
-    from kairos.services.response_cache import get_cache
+    from kairos.ai.llm.cache import get_cache
     cache = get_cache()
     if cache and cache_step:
         cached = cache.get_llm(cache_step, model, messages)
@@ -1113,7 +1113,7 @@ async def call_with_quality_fallback(
     # Learning loop: always record cloud output for future local model improvement.
     # When local is disabled (skip_primary), we still capture data so it can be
     # used for fine-tuning once the user has a GPU machine.
-    from kairos.services.llm_config import always_store_training_data as _always_store
+    from kairos.ai.llm.config import always_store_training_data as _always_store
 
     should_record = validator(cloud_result) and (not skip_primary or _always_store())
     if should_record:

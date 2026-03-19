@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from kairos.services.response_cache import (
+from kairos.ai.llm.cache import (
     GLOBAL_CACHE_DIR,
     ResponseCache,
     _hash_key,

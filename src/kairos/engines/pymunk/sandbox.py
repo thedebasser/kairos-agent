@@ -21,7 +21,7 @@ from kairos.exceptions import (
     SimulationOOMError,
     SimulationTimeoutError,
 )
-from kairos.models.contracts import SimulationResult
+from kairos.schemas.contracts import SimulationResult
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ async def execute_simulation(
         SimulationExecutionError: Any other sandbox failure.
     """
     # ── Cache check ─────────────────────────────────────────────────────
-    from kairos.services.response_cache import get_cache
+    from kairos.ai.llm.cache import get_cache
     cache = get_cache()
     if cache:
         cached = cache.get_sandbox(code)

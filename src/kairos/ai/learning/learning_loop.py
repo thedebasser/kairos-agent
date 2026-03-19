@@ -25,7 +25,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from kairos.config import get_settings
-from kairos.models.contracts import (
+from kairos.schemas.contracts import (
     CategoryKnowledge,
     FailedCheck,
     PastFix,

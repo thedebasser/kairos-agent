@@ -137,7 +137,7 @@ def cli() -> None:
 
 async def _run_pipeline(pipeline_name: str) -> None:
     """Start a new pipeline run using LangGraph orchestrator."""
-    from kairos.pipeline.graph import run_pipeline
+    from kairos.orchestrator.graph import run_pipeline
 
     logger.info("Starting pipeline: %s", pipeline_name)
     try:
@@ -156,7 +156,7 @@ async def _run_pipeline(pipeline_name: str) -> None:
 
 async def _resume_pipeline(pipeline_run_id: uuid.UUID) -> None:
     """Resume a checkpointed pipeline run using LangGraph's PostgreSQL checkpointer."""
-    from kairos.pipeline.graph import resume_pipeline
+    from kairos.orchestrator.graph import resume_pipeline
 
     logger.info("Resuming pipeline run: %s", pipeline_run_id)
     try:
@@ -178,7 +178,7 @@ async def _restart_pipeline(pipeline_run_id: uuid.UUID) -> None:
 
     Looks up the original pipeline name from the run, then starts fresh.
     """
-    from kairos.pipeline.graph import run_pipeline
+    from kairos.orchestrator.graph import run_pipeline
 
     logger.info("Restarting pipeline run: %s (new run)", pipeline_run_id)
 
@@ -340,7 +340,7 @@ def _inspect_run(run_id: str | None, step_number: int | None) -> None:
 
 def _show_cache(*, evict: bool = False, as_json: bool = False) -> None:
     """Show cache statistics and optionally run eviction."""
-    from kairos.services.response_cache import ResponseCache
+    from kairos.ai.llm.cache import ResponseCache
 
     stats = ResponseCache.cache_stats()
 

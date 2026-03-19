@@ -1,4 +1,4 @@
-"""Tests for kairos.services.monitoring — Metrics, Alerting & Langfuse integration."""
+"""Tests for kairos.ai.tracing.sinks.langfuse_sink — Metrics, Alerting & Langfuse integration."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import pytest
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
-from kairos.services.monitoring import (
+from kairos.ai.tracing.sinks.langfuse_sink import (
     Alert,
     AlertManager,
     MetricEntry,
@@ -216,7 +216,7 @@ class TestAlertManager:
 class TestLangfuseClient:
     def test_returns_none_without_keys(self):
         """Langfuse client returns None when keys are not configured."""
-        import kairos.services.monitoring as m
+        import kairos.ai.tracing.sinks.langfuse_sink as m
 
         m._langfuse_client = None  # Reset singleton
         client = get_langfuse_client()
@@ -240,7 +240,7 @@ class TestLangfuseClient:
 
     def test_trace_llm_call_records_local_metric(self):
         """trace_llm_call always records to local metrics store."""
-        import kairos.services.monitoring as m
+        import kairos.ai.tracing.sinks.langfuse_sink as m
 
         store = MetricsStore()
         original_store = m._metrics_store
@@ -264,7 +264,7 @@ class TestLangfuseClient:
 
     def test_trace_pipeline_step_records_metric(self):
         """trace_pipeline_step records to local metrics."""
-        import kairos.services.monitoring as m
+        import kairos.ai.tracing.sinks.langfuse_sink as m
 
         store = MetricsStore()
         original_store = m._metrics_store
@@ -293,7 +293,7 @@ class TestGlobalHelpers:
         assert s1 is s2
 
     def test_record_metric_convenience(self):
-        import kairos.services.monitoring as m
+        import kairos.ai.tracing.sinks.langfuse_sink as m
 
         store = MetricsStore()
         original_store = m._metrics_store

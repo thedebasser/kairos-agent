@@ -30,15 +30,15 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from kairos.agents.base import BaseAudioReviewAgent
-from kairos.models.contracts import (
+from kairos.pipelines.contracts import AudioReviewAgent as _AudioReviewAgentBase
+from kairos.schemas.contracts import (
     AudioReviewResult,
     LoudnessMetrics,
     ReviewIssue,
     ReviewIssueSeverity,
 )
-from kairos.services.llm_config import get_step_config
-from kairos.services.llm_routing import _record_llm_call
+from kairos.ai.llm.config import get_step_config
+from kairos.ai.llm.routing import _record_llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -382,7 +382,7 @@ def _parse_audio_review_response(raw_text: str, model_used: str) -> tuple[bool, 
 # =============================================================================
 
 
-class AudioReviewAgent(BaseAudioReviewAgent):
+class AudioReviewAgent(_AudioReviewAgentBase):
     """Concrete Audio Review Agent.
 
     Default: FFmpeg extended analysis (loudness, silence, clipping) + LLM
@@ -613,7 +613,7 @@ class AudioReviewAgent(BaseAudioReviewAgent):
 
         # ── Structured Output Retry Loop ──────────────────────────────
         import time as _time
-        from kairos.services.llm_routing import call_ollama_direct
+        from kairos.ai.llm.routing import call_ollama_direct
 
         MAX_STRUCTURED_RETRIES = 2
         last_raw_text = ""

@@ -8,7 +8,7 @@ metadata from YAML front-matter headers (Finding 3.2).
 
 Usage::
 
-    from kairos.pipelines.physics.prompts.builder import (
+    from kairos.ai.prompts.physics.builder import (
         build_simulation_prompt,
         load_system_prompt,
         build_user_prompt,
@@ -28,7 +28,7 @@ import logging
 from functools import lru_cache
 from pathlib import Path
 
-from kairos.services.prompt_registry import PromptRegistry, RenderedPrompt
+from kairos.ai.prompts.registry import PromptRegistry, RenderedPrompt
 
 logger = logging.getLogger(__name__)
 

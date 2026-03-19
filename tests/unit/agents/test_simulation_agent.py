@@ -18,7 +18,7 @@ from kairos.exceptions import (
     SimulationOOMError,
     SimulationTimeoutError,
 )
-from kairos.models.contracts import (
+from kairos.schemas.contracts import (
     ConceptBrief,
     PipelineState,
     PipelineStatus,
@@ -28,7 +28,7 @@ from kairos.models.contracts import (
     ValidationCheck,
     ValidationResult,
 )
-from kairos.models.simulation import AdjustedSimulationCode, SimulationCode
+from kairos.schemas.simulation import AdjustedSimulationCode, SimulationCode
 from kairos.pipelines.physics.simulation_agent import PhysicsSimulationAgent
 
 pytestmark = [pytest.mark.unit]
@@ -629,7 +629,7 @@ class TestAdapterIntegration:
 
     def test_adapter_returns_simulation_agent(self) -> None:
         """PhysicsPipelineAdapter.get_simulation_agent should return PhysicsSimulationAgent."""
-        from kairos.pipelines.physics.adapter import PhysicsPipelineAdapter
+        from kairos.pipelines.adapters.physics_adapter import PhysicsPipelineAdapter
 
         adapter = PhysicsPipelineAdapter()
         agent = adapter.get_simulation_agent()

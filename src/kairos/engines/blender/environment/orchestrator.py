@@ -16,18 +16,18 @@ import time
 from pathlib import Path
 from typing import Any
 
-from kairos.services.environment.theme_catalogue import (
+from kairos.engines.blender.environment.theme_catalogue import (
     ThemeConfig,
     get_theme,
     pick_random_theme,
 )
-from kairos.services.environment.poly_haven import (
+from kairos.engines.blender.environment.poly_haven import (
     get_ground_texture,
     get_hdri,
 )
-from kairos.services.environment.freesound_sfx import fetch_sfx_pool
-from kairos.services.environment.sfx_pool import SFXPool
-from kairos.services.environment.synthetic_sfx import generate_synthetic_pool
+from kairos.services.audio.freesound_sfx import fetch_sfx_pool
+from kairos.services.audio.sfx_pool import SFXPool
+from kairos.services.audio.synthetic_sfx import generate_synthetic_pool
 
 logger = logging.getLogger(__name__)
 

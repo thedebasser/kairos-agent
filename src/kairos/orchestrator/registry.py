@@ -13,12 +13,12 @@ import pkgutil
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from kairos.agents.base import BasePipelineAdapter
+    from kairos.pipelines.contracts import PipelineAdapter
 
 logger = logging.getLogger(__name__)
 
 # Global registry: pipeline_name → adapter class
-_REGISTRY: dict[str, type[BasePipelineAdapter]] = {}
+_REGISTRY: dict[str, type[PipelineAdapter]] = {}
 _discovered = False
 
 
@@ -27,11 +27,11 @@ def register_pipeline(pipeline_name: str) -> type:
 
     Usage:
         @register_pipeline("physics")
-        class PhysicsPipelineAdapter(BasePipelineAdapter):
+        class PhysicsPipelineAdapter(PipelineAdapter):
             ...
     """
 
-    def decorator(cls: type[BasePipelineAdapter]) -> type[BasePipelineAdapter]:
+    def decorator(cls: type[PipelineAdapter]) -> type[PipelineAdapter]:
         if pipeline_name in _REGISTRY:
             msg = (
                 f"Pipeline '{pipeline_name}' is already registered "
@@ -65,7 +65,7 @@ def _discover_pipelines() -> None:
         logger.debug("Pipeline auto-discovery failed", exc_info=True)
 
 
-def get_pipeline(pipeline_name: str) -> BasePipelineAdapter:
+def get_pipeline(pipeline_name: str) -> PipelineAdapter:
     """Instantiate and return a pipeline adapter by name.
 
     Raises:
@@ -85,7 +85,7 @@ def list_pipelines() -> list[str]:
     return sorted(_REGISTRY.keys())
 
 
-def get_registry() -> dict[str, type[BasePipelineAdapter]]:
+def get_registry() -> dict[str, type[PipelineAdapter]]:
     """Return the full pipeline registry (for testing/inspection)."""
     _discover_pipelines()
     return dict(_REGISTRY)

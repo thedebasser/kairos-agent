@@ -2,7 +2,7 @@
 
 import pytest
 
-from kairos.models.contracts import ScenarioCategory
+from kairos.schemas.contracts import ScenarioCategory
 
 pytestmark = pytest.mark.pipeline
 

@@ -1,6 +1,6 @@
 """Domino Idea Agent.
 
-Implements BaseIdeaAgent for the Blender domino run pipeline.
+Implements IdeaAgent for the Blender domino run pipeline.
 
 Uses LLM to select an archetype and generate a DominoCourseConfig,
 then converts it to a ConceptBrief for the shared graph.
@@ -15,9 +15,9 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from kairos.agents.base import BaseIdeaAgent
+from kairos.pipelines.contracts import IdeaAgent
 from kairos.exceptions import ConceptGenerationError
-from kairos.models.contracts import (
+from kairos.schemas.contracts import (
     AudioBrief,
     ConceptBrief,
     DominoArchetype,
@@ -27,8 +27,8 @@ from kairos.models.contracts import (
     SimulationRequirements,
 )
 from kairos.pipelines.domino.models import DominoCourseConfig
-from kairos.services.llm_config import get_step_config
-from kairos.services.llm_routing import call_llm, call_with_quality_fallback
+from kairos.ai.llm.config import get_step_config
+from kairos.ai.llm.routing import call_llm, call_with_quality_fallback
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +108,7 @@ Output ONLY valid JSON matching this schema:
 """
 
 
-class DominoIdeaAgent(BaseIdeaAgent):
+class DominoIdeaAgent(IdeaAgent):
     """Idea Agent for the Blender domino run pipeline.
 
     Selects an archetype (programmatic rotation), then uses
@@ -130,7 +130,7 @@ class DominoIdeaAgent(BaseIdeaAgent):
         3. Convert to ConceptBrief for the shared pipeline graph
         """
         # ── Cache check ──────────────────────────────────────────────
-        from kairos.services.response_cache import get_cache
+        from kairos.ai.llm.cache import get_cache
         cache = get_cache()
         if cache:
             cached = cache.get_step("domino_idea")

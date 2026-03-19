@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from kairos.models.contracts import ScenarioCategory
+from kairos.schemas.contracts import ScenarioCategory
 from kairos.tools.prompt_harness import SAMPLE_CONCEPTS
 
 pytestmark = [pytest.mark.unit]

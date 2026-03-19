@@ -31,16 +31,16 @@ from kairos.exceptions import (
     ValidationError,
     VideoAssemblyError,
 )
-from kairos.models.contracts import (
+from kairos.schemas.contracts import (
     IdeaAgentInput,
     PipelineState,
     PipelineStatus,
     ReviewAction,
 )
-from kairos.pipeline.registry import get_pipeline
-from kairos.services.response_cache import get_cache, init_cache
+from kairos.orchestrator.registry import get_pipeline
+from kairos.ai.llm.cache import get_cache, init_cache
 from kairos.services.step_artifacts import get_run_artifacts, init_run_artifacts
-from kairos.services.llm_routing import collect_llm_calls, collect_thinking
+from kairos.ai.llm.routing import collect_llm_calls, collect_thinking
 
 logger = logging.getLogger(__name__)
 
@@ -377,11 +377,11 @@ async def simulation_node(state: dict[str, Any]) -> dict[str, Any]:
 
     # ── Learning loop: store training example + update category knowledge ──
     try:
-        from kairos.services.learning_loop import (
+        from kairos.ai.learning.learning_loop import (
             record_training_example,
             update_category_knowledge,
         )
-        from kairos.models.contracts import ValidationResult as _VR
+        from kairos.schemas.contracts import ValidationResult as _VR
 
         _concept_data = state.get("concept") or {}
         _category = _concept_data.get("category", "") if isinstance(_concept_data, dict) else ""
@@ -464,7 +464,7 @@ async def video_editor_node(state: dict[str, Any]) -> dict[str, Any]:
 
     try:
         # Select music
-        from kairos.models.contracts import SimulationStats
+        from kairos.schemas.contracts import SimulationStats
 
         stats_data = state.get("simulation_stats")
         stats = SimulationStats(**stats_data) if stats_data else SimulationStats(
@@ -629,7 +629,7 @@ async def video_review_node(state: dict[str, Any]) -> dict[str, Any]:
     concept = None
     if state.get("concept"):
         try:
-            from kairos.models.contracts import ConceptBrief
+            from kairos.schemas.contracts import ConceptBrief
             concept_data = state["concept"]
             if isinstance(concept_data, dict):
                 concept = ConceptBrief(**concept_data)
@@ -1122,7 +1122,7 @@ async def run_pipeline(
 
     # --- P3.29: Post-run cost alert check ---
     try:
-        from kairos.services.monitoring import AlertManager
+        from kairos.ai.tracing.sinks.langfuse_sink import AlertManager
 
         total_cost = final_state.get("total_cost_usd", 0.0)
         alert_mgr = AlertManager()
@@ -1171,7 +1171,7 @@ def _dict_to_pipeline_state(state: dict[str, Any]) -> PipelineState:
     LangGraph uses plain dicts for state. This helper reconstructs
     the typed PipelineState for use by agent methods that expect it.
     """
-    from kairos.models.contracts import (
+    from kairos.schemas.contracts import (
         CaptionSet,
         ConceptBrief,
         MusicTrackMetadata,

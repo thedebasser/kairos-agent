@@ -6,7 +6,7 @@ Validates that all data models accept valid input and reject invalid input.
 import pytest
 from pydantic import ValidationError
 
-from kairos.models.contracts import (
+from kairos.schemas.contracts import (
     AudioBrief,
     Caption,
     CaptionSet,

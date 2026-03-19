@@ -27,7 +27,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from kairos.config import get_settings
-from kairos.models.contracts import (
+from kairos.schemas.contracts import (
     AudioBrief,
     ConceptBrief,
     EnergyLevel,

@@ -85,7 +85,7 @@ dev = [
 ]
 
 [project.scripts]
-pipeline = "kairos.cli:cli"
+pipeline = "kairos.cli.main:cli"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/kairos"]

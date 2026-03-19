@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from kairos.config import get_settings
-from kairos.services.monitoring import AlertManager, MetricsStore, get_metrics_store
+from kairos.ai.tracing.sinks.langfuse_sink import AlertManager, MetricsStore, get_metrics_store
 
 logger = logging.getLogger(__name__)
 

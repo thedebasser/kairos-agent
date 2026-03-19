@@ -26,8 +26,8 @@ from typing import Any
 import litellm
 
 from kairos.config import get_settings
-from kairos.models.contracts import ValidationCheck
-from kairos.services.llm_config import get_step_config, get_ollama_base_url
+from kairos.schemas.contracts import ValidationCheck
+from kairos.ai.llm.config import get_step_config, get_ollama_base_url
 
 logger = logging.getLogger(__name__)
 
