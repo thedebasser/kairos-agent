@@ -24,13 +24,10 @@ Object colours: {{ colour_palette }}
 {{ special_effects }}
 
 ### Config Schema
-The JSON config must match this schema. Fields with defaults can be omitted.
-Physics parameters (elasticity, friction, mass, substeps) are template-enforced
-and included for reference only — focus on creative parameters.
-
-```json
-{{ config_schema }}
-```
+The JSON config must match the response schema (auto-provided). Fields with
+defaults can be omitted. Physics parameters (elasticity, friction, mass,
+substeps) are template-enforced and included for reference only — focus on
+creative parameters.
 
 Generate the config JSON that best realises the concept brief above.
 Use the full colour palette and fill the visible canvas with objects.

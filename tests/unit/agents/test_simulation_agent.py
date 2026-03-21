@@ -237,7 +237,7 @@ class TestValidateOutput:
         passing_validation: ValidationResult,
     ) -> None:
         """Should call validation.validate_simulation and return the result."""
-        mock_validation.validate_simulation = MagicMock(return_value=passing_validation)
+        mock_validation.validate_simulation = AsyncMock(return_value=passing_validation)
 
         result = await agent.validate_output("/path/to/video.mp4")
 

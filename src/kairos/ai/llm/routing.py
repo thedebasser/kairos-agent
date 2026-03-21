@@ -956,17 +956,21 @@ async def call_with_quality_fallback(
                 max_tokens=16384,
                 **primary_extra_params,
             )
-            result = await asyncio.wait_for(
+            result, local_completion = await asyncio.wait_for(
                 loop.run_in_executor(
                     None,
                     functools.partial(
-                        client.chat.completions.create,
+                        client.chat.completions.create_with_completion,
                         **local_call_kwargs,
                     ),
                 ),
                 timeout=local_timeout_sec + 30,
             )  # type: ignore[assignment]
             latency = int((time.monotonic() - start) * 1000)
+
+            # Phase 4: extract token/cost from local completion
+            local_tin, local_tout, local_cost = _extract_usage(local_completion, resolved_primary)
+
             logger.debug("%s responded in %dms", primary_model, latency)
 
             if validator(result):
@@ -977,13 +981,16 @@ async def call_with_quality_fallback(
                     output=result,
                     latency_ms=latency,
                     status="success",
+                    tokens_in=local_tin,
+                    tokens_out=local_tout,
+                    cost_usd=local_cost,
                 )
                 _record_llm_call(
                     model_alias=primary_model,
                     model_resolved=resolved_primary,
                     call_pattern="quality_fallback",
                     routing_outcome="local",
-                    tokens_in=0, tokens_out=0, cost_usd=0.0,
+                    tokens_in=local_tin, tokens_out=local_tout, cost_usd=local_cost,
                     latency_ms=latency,
                     status="success",
                     model_type=primary_caps.model_type,
@@ -998,13 +1005,16 @@ async def call_with_quality_fallback(
                 output=result,
                 latency_ms=latency,
                 status="quality_failed",
+                tokens_in=local_tin,
+                tokens_out=local_tout,
+                cost_usd=local_cost,
             )
             _record_llm_call(
                 model_alias=primary_model,
                 model_resolved=resolved_primary,
                 call_pattern="quality_fallback",
                 routing_outcome="local",
-                tokens_in=0, tokens_out=0, cost_usd=0.0,
+                tokens_in=local_tin, tokens_out=local_tout, cost_usd=local_cost,
                 latency_ms=latency,
                 status="quality_failed",
                 model_type=primary_caps.model_type,
@@ -1045,7 +1055,7 @@ async def call_with_quality_fallback(
     # Pre-flight context window budget check (Finding 3.4)
     _check_context_budget(resolved_fallback, messages, 16384)
 
-    cloud_timeout_sec = 300  # Match local timeout (Finding 4.3)
+    cloud_timeout_sec = 120  # Phase 4: cloud calls timeout at 120s (was 300)
     cloud_kwargs: dict[str, Any] = dict(
         model=resolved_fallback,
         messages=messages,

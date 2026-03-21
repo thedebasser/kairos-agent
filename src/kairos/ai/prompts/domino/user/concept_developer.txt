@@ -22,5 +22,4 @@ Locked values (do not change):
 Archetype for this video: {{ archetype }}
 Palette for this video: {{ palette }}
 
-Output ONLY valid JSON matching this schema:
-{{ schema }}
+Output ONLY valid JSON matching the response schema.

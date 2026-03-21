@@ -22,7 +22,7 @@ class TestSampleConcepts:
         """All sample concepts should pass Pydantic validation."""
         for name, concept in SAMPLE_CONCEPTS.items():
             assert concept.category.value == name
-            assert concept.pipeline == "physics"
+            assert concept.pipeline in ("physics", "domino")
             assert len(concept.hook_text.split()) <= 6
             assert concept.target_duration_sec >= 62
             assert concept.target_duration_sec <= 68

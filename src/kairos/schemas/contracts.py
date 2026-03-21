@@ -108,8 +108,8 @@ class ScenarioCategory(str, Enum):
     """POC scenario categories for Oddly Satisfying Physics pipeline."""
 
     BALL_PIT = "ball_pit"
-    # MARBLE_FUNNEL = "marble_funnel"  # disabled — ramp geometry needs work
-    # DOMINO_CHAIN = "domino_chain"  # disabled — doesn't work for portrait
+    MARBLE_FUNNEL = "marble_funnel"
+    DOMINO_CHAIN = "domino_chain"
     DESTRUCTION = "destruction"
 
 

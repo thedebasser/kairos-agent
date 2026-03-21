@@ -5,19 +5,24 @@ Two-tier validation for simulation outputs:
 - Tier 2: AI-assisted checks (optional, Moondream2)
 
 All validation is programmatic first, LLM-assisted second.
+
+Phase 4: All FFprobe/FFmpeg calls converted from blocking
+``subprocess.run`` to ``asyncio.create_subprocess_exec`` via
+the shared ``async_subprocess`` helper.
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
 import shutil
-import subprocess
 from pathlib import Path
 
 from kairos.config import get_settings
 from kairos.schemas.contracts import ValidationCheck, ValidationResult
+from kairos.services.async_subprocess import run_async, run_ffprobe_json
 
 logger = logging.getLogger(__name__)
 
@@ -42,42 +47,26 @@ def clear_ffprobe_cache() -> None:
     _ffprobe_cache.clear()
 
 
-def _run_ffprobe(video_path: str) -> dict[str, object]:
-    """Run ffprobe and return parsed JSON output.
+async def _run_ffprobe(video_path: str) -> dict[str, object]:
+    """Run ffprobe asynchronously and return parsed JSON output.
 
     Results are cached per *video_path* so that a ``validate_simulation``
     call only spawns a single ffprobe subprocess regardless of how many
     individual check functions need the metadata.
+
+    Phase 4: converted from ``subprocess.run`` to async.
     """
     if video_path in _ffprobe_cache:
         return _ffprobe_cache[video_path]
 
-    cmd = [
-        _get_ffprobe_path(),
-        "-v",
-        "quiet",
-        "-print_format",
-        "json",
-        "-show_format",
-        "-show_streams",
-        video_path,
-    ]
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        if result.returncode != 0:
-            _ffprobe_cache[video_path] = {}
-            return {}
-        parsed = json.loads(result.stdout)
-        _ffprobe_cache[video_path] = parsed
-        return parsed  # type: ignore[no-any-return]
-    except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError):
-        _ffprobe_cache[video_path] = {}
-        return {}
+    parsed = await run_ffprobe_json(_get_ffprobe_path(), video_path, timeout=30)
+    _ffprobe_cache[video_path] = parsed
+    return parsed
 
 
-def check_valid_mp4(video_path: str) -> ValidationCheck:
+async def check_valid_mp4(video_path: str) -> ValidationCheck:
     """Check that the file is a valid MP4 with parseable metadata."""
-    probe = _run_ffprobe(video_path)
+    probe = await _run_ffprobe(video_path)
     passed = bool(probe and "format" in probe and "streams" in probe)
     return ValidationCheck(
         name="valid_mp4",
@@ -86,9 +75,9 @@ def check_valid_mp4(video_path: str) -> ValidationCheck:
     )
 
 
-def check_resolution(video_path: str, *, target: str = "1080x1920") -> ValidationCheck:
+async def check_resolution(video_path: str, *, target: str = "1080x1920") -> ValidationCheck:
     """Check video resolution matches target (width x height)."""
-    probe = _run_ffprobe(video_path)
+    probe = await _run_ffprobe(video_path)
     target_w, target_h = (int(x) for x in target.split("x"))
 
     for stream in probe.get("streams", []):
@@ -110,9 +99,9 @@ def check_resolution(video_path: str, *, target: str = "1080x1920") -> Validatio
     )
 
 
-def check_fps(video_path: str, *, min_fps: int = 30) -> ValidationCheck:
+async def check_fps(video_path: str, *, min_fps: int = 30) -> ValidationCheck:
     """Check that video FPS is at or above minimum."""
-    probe = _run_ffprobe(video_path)
+    probe = await _run_ffprobe(video_path)
     for stream in probe.get("streams", []):
         if stream.get("codec_type") == "video":
             fps_str = stream.get("r_frame_rate", "0/1")
@@ -132,7 +121,7 @@ def check_fps(video_path: str, *, min_fps: int = 30) -> ValidationCheck:
     return ValidationCheck(name="fps", passed=False, message="No video stream found")
 
 
-def check_duration(
+async def check_duration(
     video_path: str,
     *,
     min_sec: int | None = None,
@@ -143,7 +132,7 @@ def check_duration(
     min_sec = min_sec or settings.target_duration_min_sec
     max_sec = max_sec or settings.target_duration_max_sec
 
-    probe = _run_ffprobe(video_path)
+    probe = await _run_ffprobe(video_path)
     duration = float(probe.get("format", {}).get("duration", 0))
     passed = min_sec <= duration <= max_sec
     return ValidationCheck(
@@ -183,9 +172,9 @@ def check_file_size(
     )
 
 
-def check_audio_present(video_path: str) -> ValidationCheck:
+async def check_audio_present(video_path: str) -> ValidationCheck:
     """Check that an audio stream exists in the video."""
-    probe = _run_ffprobe(video_path)
+    probe = await _run_ffprobe(video_path)
     has_audio = any(
         s.get("codec_type") == "audio" for s in probe.get("streams", [])
     )
@@ -196,9 +185,9 @@ def check_audio_present(video_path: str) -> ValidationCheck:
     )
 
 
-def check_frame_count(video_path: str) -> ValidationCheck:
+async def check_frame_count(video_path: str) -> ValidationCheck:
     """Check frame count matches expected (duration × FPS) within 1%."""
-    probe = _run_ffprobe(video_path)
+    probe = await _run_ffprobe(video_path)
     duration = float(probe.get("format", {}).get("duration", 0))
 
     for stream in probe.get("streams", []):
@@ -240,7 +229,7 @@ def check_frame_count(video_path: str) -> ValidationCheck:
     )
 
 
-def check_frozen_frames(
+async def check_frozen_frames(
     video_path: str,
     *,
     max_consecutive: int = 5,
@@ -266,8 +255,8 @@ def check_frozen_frames(
             "rgb24",
             "-",
         ]
-        result = subprocess.run(cmd, capture_output=True, timeout=60)
-        if result.returncode != 0:
+        rc, stdout_bytes, _ = await run_async(cmd, timeout=60, text=False)
+        if rc != 0:
             return ValidationCheck(
                 name="frozen_frames",
                 passed=True,
@@ -275,7 +264,7 @@ def check_frozen_frames(
             )
 
         # Hash each frame chunk
-        frame_data = result.stdout
+        frame_data = stdout_bytes
         if not frame_data:
             return ValidationCheck(
                 name="frozen_frames",
@@ -315,7 +304,7 @@ def check_frozen_frames(
             value=max_streak,
             threshold=max_consecutive,
         )
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+    except (asyncio.TimeoutError, FileNotFoundError):
         return ValidationCheck(
             name="frozen_frames",
             passed=True,
@@ -323,7 +312,7 @@ def check_frozen_frames(
         )
 
 
-def check_colour_valid(
+async def check_colour_valid(
     video_path: str,
     *,
     black_threshold: float = 5.0,
@@ -357,17 +346,16 @@ def check_colour_valid(
             "null",
             "-",
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        if result.returncode != 0:
+        rc, _, stderr = await run_async(cmd, timeout=30, text=True)
+        if rc != 0:
             return ValidationCheck(
                 name="colour_valid",
                 passed=False,
-                message=f"FFmpeg colour analysis failed (rc={result.returncode})",
+                message=f"FFmpeg colour analysis failed (rc={rc})",
             )
 
         # Parse mean pixel values from signalstats output lines like:
         #   [Parsed_signalstats...] YAVG: 16.2
-        stderr = result.stderr
         y_avg_values: list[float] = []
         for match in _re.finditer(r"YAVG:\s*([\d.]+)", stderr):
             y_avg_values.append(float(match.group(1)))
@@ -419,7 +407,7 @@ def check_colour_valid(
             passed=True,
             message=f"Colour check passed (mean brightness={mean_brightness:.1f})",
         )
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+    except (asyncio.TimeoutError, FileNotFoundError):
         return ValidationCheck(
             name="colour_valid",
             passed=True,
@@ -427,7 +415,7 @@ def check_colour_valid(
         )
 
 
-def check_motion_present(
+async def check_motion_present(
     video_path: str,
     *,
     num_samples: int = 10,
@@ -452,13 +440,13 @@ def check_motion_present(
             "null",
             "-",
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        rc, _, stderr = await run_async(cmd, timeout=60, text=True)
 
         # Parse signalstats output for YAVG (average luma difference)
         # Higher YAVG = more motion between consecutive frames
         import re
 
-        yavg_values = re.findall(r"YAVG:(\d+\.?\d*)", result.stderr)
+        yavg_values = re.findall(r"YAVG:(\d+\.?\d*)", stderr)
         if not yavg_values:
             return ValidationCheck(
                 name="motion_present",
@@ -476,7 +464,7 @@ def check_motion_present(
             value=round(avg_motion, 1),
             threshold=variance_threshold,
         )
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+    except (asyncio.TimeoutError, FileNotFoundError):
         return ValidationCheck(
             name="motion_present",
             passed=True,
@@ -484,7 +472,7 @@ def check_motion_present(
         )
 
 
-def validate_simulation(
+async def validate_simulation(
     video_path: str,
     *,
     run_tier2: bool = False,
@@ -499,29 +487,32 @@ def validate_simulation(
 
     Returns:
         ValidationResult with all check results.
+
+    Phase 4: now fully async — all ffprobe/ffmpeg calls use
+    ``asyncio.create_subprocess_exec`` under the hood.
     """
     skip = skip_checks or set()
     checks: list[ValidationCheck] = []
 
     # Tier 1 — Programmatic (mandatory)
-    checks.append(check_valid_mp4(video_path))
-    checks.append(check_resolution(video_path))
-    checks.append(check_fps(video_path))
-    checks.append(check_duration(video_path))
+    checks.append(await check_valid_mp4(video_path))
+    checks.append(await check_resolution(video_path))
+    checks.append(await check_fps(video_path))
+    checks.append(await check_duration(video_path))
     checks.append(check_file_size(video_path))
-    checks.append(check_frame_count(video_path))
+    checks.append(await check_frame_count(video_path))
     if "audio_present" not in skip:
-        checks.append(check_audio_present(video_path))
-    checks.append(check_frozen_frames(video_path))
-    checks.append(check_colour_valid(video_path))
-    checks.append(check_motion_present(video_path))
+        checks.append(await check_audio_present(video_path))
+    checks.append(await check_frozen_frames(video_path))
+    checks.append(await check_colour_valid(video_path))
+    checks.append(await check_motion_present(video_path))
 
     tier1_passed = all(c.passed for c in checks)
 
     # Tier 2 — AI-assisted (optional)
     tier2_passed: bool | None = None
     if run_tier2:
-        tier2_checks = _run_tier2_checks(video_path)
+        tier2_checks = await _run_tier2_checks(video_path)
         checks.extend(tier2_checks)
         tier2_passed = all(c.passed for c in tier2_checks)
 
@@ -535,7 +526,7 @@ def validate_simulation(
     )
 
 
-def _run_tier2_checks(video_path: str) -> list[ValidationCheck]:
+async def _run_tier2_checks(video_path: str) -> list[ValidationCheck]:
     """Run AI-assisted Tier 2 validation checks using Moondream2.
 
     Extracts frames at early (2s), mid, and late (last 3s) timestamps
@@ -545,7 +536,7 @@ def _run_tier2_checks(video_path: str) -> list[ValidationCheck]:
         from kairos.services.screenshot_analyzer import analyze_to_validation_checks
 
         logger.info("Running Tier 2 AI-assisted checks on %s", video_path)
-        return analyze_to_validation_checks(video_path)
+        return await analyze_to_validation_checks(video_path)
     except Exception as e:
         logger.warning("Tier 2 AI checks failed: %s", e, exc_info=True)
         return [

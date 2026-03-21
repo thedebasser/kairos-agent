@@ -34,7 +34,7 @@ from uuid import uuid4
 
 import yaml
 
-from kairos.schemas.contracts import (
+from kairos.models.contracts import (
     AudioBrief,
     ConceptBrief,
     EnergyLevel,

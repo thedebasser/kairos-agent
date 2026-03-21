@@ -44,14 +44,15 @@ def render_concept_user(
     *,
     archetype: str,
     palette: str,
-    schema: str,
 ) -> RenderedPrompt:
-    """Render the domino concept developer user prompt."""
+    """Render the domino concept developer user prompt.
+
+    Phase 4: ``schema`` param removed — Instructor injects it via response_model.
+    """
     return _get_registry().render(
         "user/concept_developer.txt",
         variables={
             "archetype": archetype,
             "palette": palette,
-            "schema": schema,
         },
     )
