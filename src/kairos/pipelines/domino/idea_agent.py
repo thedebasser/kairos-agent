@@ -146,10 +146,7 @@ class DominoIdeaAgent(IdeaAgent):
 
     async def _generate_config(self, archetype: str) -> DominoCourseConfig:
         """Call LLM to generate a DominoCourseConfig."""
-        schema = json.dumps(
-            DominoCourseConfig.model_json_schema(),
-            indent=2,
-        )
+        # Phase 4: schema removed from prompt — Instructor injects it via response_model
 
         palette = random.choice(["rainbow", "neon", "pastel", "ocean", "sunset", "earth"])  # noqa: S311
 
@@ -157,7 +154,7 @@ class DominoIdeaAgent(IdeaAgent):
 
         system_rp = render_concept_system(rulebook=rulebook)
         user_rp = render_concept_user(
-            archetype=archetype, palette=palette, schema=schema,
+            archetype=archetype, palette=palette,
         )
 
         messages = [
@@ -241,9 +238,8 @@ class DominoIdeaAgent(IdeaAgent):
 
         return ConceptBrief(
             pipeline=pipeline,
-            # Use BALL_PIT as compatible category — the simulation agent
-            # detects pipeline="domino" and uses the embedded config.
-            category=ScenarioCategory.BALL_PIT,
+            # Phase 4: use the correct category for domino runs
+            category=ScenarioCategory.DOMINO_CHAIN,
             title=config.title,
             visual_brief=config.visual_brief,
             simulation_requirements=SimulationRequirements(

@@ -288,7 +288,7 @@ class DominoSimulationAgent(SimulationAgent):
         if frames_dir.exists() and any(frames_dir.glob("*.png")):
             n_frames = len(list(frames_dir.glob("*.png")))
             logger.info("[domino_sim] Combining %d frames into video...", n_frames)
-            import subprocess as sp
+            from kairos.services.async_subprocess import run_async as _run_async
 
             if has_collision:
                 # Collision audio only (no ambient bed)
@@ -319,12 +319,12 @@ class DominoSimulationAgent(SimulationAgent):
                     "-crf", "18",
                     str(output_video),
                 ]
-            proc = sp.run(ffmpeg_cmd, capture_output=True, text=True, timeout=300)
-            if proc.returncode != 0:
+            rc, _, ff_stderr = await _run_async(ffmpeg_cmd, timeout=300, text=True)
+            if rc != 0:
                 return SimulationResult(
-                    returncode=proc.returncode,
+                    returncode=rc,
                     stdout=stdout,
-                    stderr=f"ffmpeg frame combine failed: {proc.stderr[-500:]}",
+                    stderr=f"ffmpeg frame combine failed: {ff_stderr[-500:]}",
                 )
 
         output_files = [str(output_video)] if output_video.exists() else []
@@ -554,22 +554,12 @@ class DominoSimulationAgent(SimulationAgent):
         if vp.exists():
             file_size = vp.stat().st_size
             try:
-                import subprocess
-                probe = subprocess.run(
-                    [
-                        _get_ffprobe_path(), "-v", "quiet",
-                        "-print_format", "json",
-                        "-show_format",
-                        str(vp),
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
+                from kairos.services.async_subprocess import run_ffprobe_json
+                info = await run_ffprobe_json(
+                    _get_ffprobe_path(), str(vp), timeout=30,
                 )
-                if probe.returncode == 0:
-                    info = json.loads(probe.stdout)
-                    duration = float(info.get("format", {}).get("duration", 65.0))
-                    frames = int(duration * 30)
+                duration = float(info.get("format", {}).get("duration", 65.0))
+                frames = int(duration * 30)
             except Exception:
                 pass
 

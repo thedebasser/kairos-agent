@@ -11,8 +11,8 @@ class TestScenarioCategories:
     """Tests for physics scenario categories."""
 
     def test_all_poc_categories(self):
-        # MARBLE_FUNNEL and DOMINO_CHAIN are disabled in the enum pending rework
-        expected = {"ball_pit", "destruction"}
+        # Phase 4: MARBLE_FUNNEL and DOMINO_CHAIN re-enabled
+        expected = {"ball_pit", "destruction", "marble_funnel", "domino_chain"}
         actual = {c.value for c in ScenarioCategory}
         assert actual == expected
 

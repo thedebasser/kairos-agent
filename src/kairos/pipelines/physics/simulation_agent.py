@@ -117,11 +117,8 @@ class PhysicsSimulationAgent(SimulationAgent):
         if config_cls is None:
             raise ValueError(f"No config schema for category '{category}'")
 
-        # Build the prompt requesting JSON config
-        schema_json = json.dumps(
-            config_cls.model_json_schema(),
-            indent=2,
-        )
+        # Phase 4: config_schema removed from prompt vars — Instructor injects
+        # the schema automatically via response_model.
 
         prompt_vars = {
             "title": concept.title,
@@ -135,7 +132,6 @@ class PhysicsSimulationAgent(SimulationAgent):
             "special_effects": json.dumps(concept.simulation_requirements.special_effects),
             "target_duration_sec": str(concept.target_duration_sec),
             "seed": str(concept.seed or 42),
-            "config_schema": schema_json,
         }
 
         # --- Learning loop: assemble extra context for the prompt ---
@@ -230,17 +226,12 @@ class PhysicsSimulationAgent(SimulationAgent):
     async def validate_output(self, video_path: str) -> ValidationResult:
         """Run Tier 1 (mandatory) + optional Tier 2 validation.
 
-        Validation functions are synchronous (FFprobe-based), so we
-        offload them to a thread executor.
+        Phase 4: validation is now fully async (no executor needed).
         """
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None,
-            lambda: validation.validate_simulation(
-                video_path,
-                run_tier2=False,
-                skip_checks={"audio_present"},  # audio added by video_editor
-            ),
+        return await validation.validate_simulation(
+            video_path,
+            run_tier2=False,
+            skip_checks={"audio_present"},  # audio added by video_editor
         )
 
     # ------------------------------------------------------------------
@@ -287,10 +278,7 @@ class PhysicsSimulationAgent(SimulationAgent):
                 category = "destruction"
 
         config_cls = CONFIG_REGISTRY.get(category)
-        schema_json = json.dumps(
-            config_cls.model_json_schema() if config_cls else {},
-            indent=2,
-        )
+        # Phase 4: config_schema removed — Instructor injects it via response_model
 
         # --- Learning loop: structured feedback + AST analysis ---
         extra_adjustment_context = ""
@@ -320,7 +308,6 @@ class PhysicsSimulationAgent(SimulationAgent):
             "failed_summary": failed_summary,
             "stdout_info": stdout_info,
             "current_config": current_config_json,
-            "config_schema": schema_json,
             "category": category,
         }).text + extra_adjustment_context
 

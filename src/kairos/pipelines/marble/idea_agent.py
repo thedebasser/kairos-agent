@@ -68,8 +68,7 @@ Locked values (do not change):
 
 Palette for this video: {palette}
 
-Output ONLY valid JSON matching this schema:
-{schema}
+Output ONLY valid JSON matching the response schema.
 """
 
 
@@ -142,10 +141,7 @@ class MarbleIdeaAgent(IdeaAgent):
 
     async def _generate_config(self, archetype: str) -> MarbleCourseConfig:
         """Call LLM to generate a MarbleCourseConfig."""
-        schema = json.dumps(
-            MarbleCourseConfig.model_json_schema(),
-            indent=2,
-        )
+        # Phase 4: schema removed from prompt — Instructor injects it via response_model
 
         # Rotate palette each run for variety
         palette = random.choice(["rainbow", "neon", "pastel", "ocean", "earth"])  # noqa: S311
@@ -156,7 +152,6 @@ class MarbleIdeaAgent(IdeaAgent):
                 "role": "user",
                 "content": _USER_PROMPT_TEMPLATE.format(
                     palette=palette,
-                    schema=schema,
                 ),
             },
         ]
@@ -205,9 +200,8 @@ class MarbleIdeaAgent(IdeaAgent):
 
         return ConceptBrief(
             pipeline=pipeline,
-            # Use BALL_PIT as a compatible category — the simulation agent
-            # will detect pipeline="marble" and use the embedded config.
-            category=ScenarioCategory.BALL_PIT,
+            # Phase 4: use the correct category for marble runs
+            category=ScenarioCategory.MARBLE_FUNNEL,
             title=config.title,
             visual_brief=config.visual_brief,
             simulation_requirements=SimulationRequirements(

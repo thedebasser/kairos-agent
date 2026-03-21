@@ -18,7 +18,6 @@ from __future__ import annotations
 import base64
 import json
 import logging
-import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -28,6 +27,7 @@ import litellm
 from kairos.config import get_settings
 from kairos.schemas.contracts import ValidationCheck
 from kairos.ai.llm.config import get_step_config, get_ollama_base_url
+from kairos.services.async_subprocess import run_async, run_ffprobe_json
 
 logger = logging.getLogger(__name__)
 
@@ -63,11 +63,13 @@ STAGE_PROMPTS = {
 }
 
 
-def _extract_frame(video_path: str, timestamp_sec: float, output_path: str) -> bool:
+async def _extract_frame(video_path: str, timestamp_sec: float, output_path: str) -> bool:
     """Extract a single frame from a video at the given timestamp.
 
     Uses ffmpeg to seek to the timestamp and extract one PNG frame.
     Returns True if extraction succeeded.
+
+    Phase 4: converted from blocking ``subprocess.run`` to async.
     """
     cmd = [
         _get_ffmpeg_path(), "-y",
@@ -78,31 +80,23 @@ def _extract_frame(video_path: str, timestamp_sec: float, output_path: str) -> b
         output_path,
     ]
     try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=30,
-        )
-        return result.returncode == 0 and Path(output_path).exists()
-    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+        rc, _, _ = await run_async(cmd, timeout=30, text=True)
+        return rc == 0 and Path(output_path).exists()
+    except (RuntimeError, FileNotFoundError) as e:
         logger.warning("Frame extraction failed at %.1fs: %s", timestamp_sec, e)
         return False
 
 
-def _get_video_duration(video_path: str) -> float:
-    """Get video duration in seconds via ffprobe."""
-    cmd = [
-        _get_ffprobe_path(), "-v", "quiet",
-        "-print_format", "json",
-        "-show_format",
-        video_path,
-    ]
+async def _get_video_duration(video_path: str) -> float:
+    """Get video duration in seconds via ffprobe.
+
+    Phase 4: converted from blocking ``subprocess.run`` to async.
+    """
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-        if result.returncode == 0:
-            info = json.loads(result.stdout)
-            return float(info.get("format", {}).get("duration", 0))
+        info = await run_ffprobe_json(_get_ffprobe_path(), video_path, timeout=15)
+        return float(info.get("format", {}).get("duration", 0))
     except Exception:
-        pass
-    return 0.0
+        return 0.0
 
 
 def _image_to_base64(image_path: str) -> str:
@@ -145,12 +139,14 @@ def _call_vision_model(image_b64: str, prompt: str) -> str:
         return f"ERROR: {e}"
 
 
-def _check_blank_frame(image_path: str) -> str | None:
+async def _check_blank_frame(image_path: str) -> str | None:
     """Fast pixel-level check for blank / solid-colour frames.
 
     Converts the PNG to raw greyscale via ffmpeg and computes basic
     statistics (mean, min, max) in pure Python.  No heavy deps needed.
     Returns a failure message string if the frame is blank, or None if OK.
+
+    Phase 4: converted from blocking ``subprocess.run`` to async.
     """
     try:
         data = Path(image_path).read_bytes()
@@ -170,11 +166,9 @@ def _check_blank_frame(image_path: str) -> str | None:
             "pipe:1",
         ]
         try:
-            result = subprocess.run(
-                cmd, capture_output=True, timeout=10,
-            )
-            if result.returncode == 0 and result.stdout:
-                pixels = result.stdout
+            rc, stdout_bytes, _ = await run_async(cmd, timeout=10, text=False)
+            if rc == 0 and stdout_bytes:
+                pixels = stdout_bytes
                 y_avg = sum(pixels) / len(pixels)
                 y_min = min(pixels)
                 y_max = max(pixels)
@@ -204,7 +198,7 @@ def _check_blank_frame(image_path: str) -> str | None:
     return None
 
 
-def analyze_frame(
+async def analyze_frame(
     video_path: str,
     timestamp_sec: float,
     stage: str,
@@ -222,7 +216,7 @@ def analyze_frame(
     with tempfile.TemporaryDirectory() as tmp:
         frame_path = str(Path(tmp) / f"frame_{stage}.png")
 
-        if not _extract_frame(video_path, timestamp_sec, frame_path):
+        if not await _extract_frame(video_path, timestamp_sec, frame_path):
             return {
                 "stage": stage,
                 "timestamp": timestamp_sec,
@@ -232,7 +226,7 @@ def analyze_frame(
             }
 
         # ── Fast pixel pre-check: catch solid-colour / blank frames ──
-        blank_result = _check_blank_frame(frame_path)
+        blank_result = await _check_blank_frame(frame_path)
         if blank_result is not None:
             return {
                 "stage": stage,
@@ -354,7 +348,7 @@ def _extract_rating(text: str) -> int:
     return 4 if len(text) > 50 else 3
 
 
-def analyze_video(video_path: str) -> list[dict[str, Any]]:
+async def analyze_video(video_path: str) -> list[dict[str, Any]]:
     """Analyze a video at three key timestamps.
 
     Extracts frames at:
@@ -364,7 +358,7 @@ def analyze_video(video_path: str) -> list[dict[str, Any]]:
 
     Returns list of analysis dicts, one per stage.
     """
-    duration = _get_video_duration(video_path)
+    duration = await _get_video_duration(video_path)
     if duration <= 0:
         logger.error("Could not determine video duration for %s", video_path)
         return [{
@@ -387,7 +381,7 @@ def analyze_video(video_path: str) -> list[dict[str, Any]]:
             "[screenshot_analyzer] Analyzing %s frame at %.1fs / %.1fs",
             stage, ts, duration,
         )
-        result = analyze_frame(video_path, ts, stage)
+        result = await analyze_frame(video_path, ts, stage)
         results.append(result)
 
         logger.info(
@@ -402,12 +396,12 @@ def analyze_video(video_path: str) -> list[dict[str, Any]]:
     return results
 
 
-def analyze_to_validation_checks(video_path: str) -> list[ValidationCheck]:
+async def analyze_to_validation_checks(video_path: str) -> list[ValidationCheck]:
     """Run full screenshot analysis and return ValidationChecks.
 
     This is the entry point for Tier 2 validation integration.
     """
-    results = analyze_video(video_path)
+    results = await analyze_video(video_path)
 
     checks: list[ValidationCheck] = []
     for r in results:

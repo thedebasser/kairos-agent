@@ -201,7 +201,9 @@ class TestScenarioCategory:
     def test_all_poc_categories_exist(self):
         assert ScenarioCategory.BALL_PIT.value == "ball_pit"
         assert ScenarioCategory.DESTRUCTION.value == "destruction"
+        assert ScenarioCategory.MARBLE_FUNNEL.value == "marble_funnel"
+        assert ScenarioCategory.DOMINO_CHAIN.value == "domino_chain"
 
     def test_category_count(self):
-        # MARBLE_FUNNEL and DOMINO_CHAIN are disabled pending rework
-        assert len(ScenarioCategory) == 2
+        # Phase 4: all 4 categories now active
+        assert len(ScenarioCategory) == 4

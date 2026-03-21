@@ -75,8 +75,64 @@ SAMPLE_CONCEPTS: dict[str, ConceptBrief] = {
         target_duration_sec=65,
         seed=42,
     ),
-    # "marble_funnel" and "domino_chain" disabled — enum members commented out
-    # in ScenarioCategory (ramp geometry / portrait layout need work).
+    "marble_funnel": ConceptBrief(
+        pipeline="physics",
+        category=ScenarioCategory.MARBLE_FUNNEL,
+        title="Giant Marble Funnel Spiral",
+        visual_brief=(
+            "Colourful marbles spiral down a massive funnel, picking up "
+            "speed as they converge at the centre and shoot out the "
+            "bottom into a glass collection bowl."
+        ),
+        simulation_requirements=SimulationRequirements(
+            body_count_initial=10,
+            body_count_max=200,
+            interaction_type="funnel_spiral",
+            colour_palette=["#E74C3C", "#3498DB", "#2ECC71", "#F39C12", "#9B59B6"],
+            background_colour="#1a1a2e",
+            special_effects=[],
+        ),
+        audio_brief=AudioBrief(
+            mood=["mesmerising", "satisfying"],
+            tempo_bpm_min=90,
+            tempo_bpm_max=120,
+            energy_curve=EnergyLevel.BUILDING,
+        ),
+        hook_text="Watch them swirl",
+        novelty_score=7.5,
+        feasibility_score=7.0,
+        target_duration_sec=65,
+        seed=123,
+    ),
+    "domino_chain": ConceptBrief(
+        pipeline="domino",
+        category=ScenarioCategory.DOMINO_CHAIN,
+        title="Epic Domino Chain Reaction",
+        visual_brief=(
+            "Thousands of colourful dominoes wind through an elaborate "
+            "course with ramps, splits, and spirals before triggering "
+            "a grand finale cascade."
+        ),
+        simulation_requirements=SimulationRequirements(
+            body_count_initial=500,
+            body_count_max=2000,
+            interaction_type="topple_chain",
+            colour_palette=["#1ABC9C", "#E74C3C", "#F1C40F", "#3498DB", "#E67E22"],
+            background_colour="#1a1a2e",
+            special_effects=["trails"],
+        ),
+        audio_brief=AudioBrief(
+            mood=["suspenseful", "satisfying"],
+            tempo_bpm_min=80,
+            tempo_bpm_max=110,
+            energy_curve=EnergyLevel.BUILDING,
+        ),
+        hook_text="Don't blink",
+        novelty_score=8.5,
+        feasibility_score=6.5,
+        target_duration_sec=65,
+        seed=256,
+    ),
     "destruction": ConceptBrief(
         pipeline="physics",
         category=ScenarioCategory.DESTRUCTION,
