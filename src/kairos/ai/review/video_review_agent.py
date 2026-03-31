@@ -30,6 +30,7 @@ from kairos.schemas.contracts import (
 )
 from kairos.ai.llm.config import get_step_config
 from kairos.ai.llm.routing import _record_llm_call
+from kairos.ai.tracing.sinks.langfuse_sink import trace_llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -370,6 +371,18 @@ class VideoReviewAgent(_VideoReviewAgentBase):
                     raw_response=raw_text,
                     raw_thinking=raw_thinking,
                 )
+                trace_llm_call(
+                    trace_name=f"video_review:{model_alias}",
+                    model=ollama_resp.model,
+                    input_messages=[{"role": m["role"], "content": "(image frames omitted)" if isinstance(m.get("content"), list) else m.get("content", "")} for m in messages],
+                    output=raw_text,
+                    tokens_in=ollama_resp.tokens_in,
+                    tokens_out=ollama_resp.tokens_out,
+                    cost_usd=0.0,
+                    latency_ms=vlm_latency,
+                    status="success",
+                    thinking=raw_thinking,
+                )
 
                 # Validate: try to parse as structured JSON
                 result = _parse_review_response(raw_text, model_alias)
@@ -427,6 +440,18 @@ class VideoReviewAgent(_VideoReviewAgentBase):
                     error=str(exc),
                     model_type="local",
                     provider="ollama",
+                )
+                trace_llm_call(
+                    trace_name=f"video_review:{model_alias}",
+                    model=model_alias,
+                    input_messages=[{"role": m["role"], "content": "(image frames omitted)" if isinstance(m.get("content"), list) else m.get("content", "")} for m in messages],
+                    output=None,
+                    tokens_in=0,
+                    tokens_out=0,
+                    cost_usd=0.0,
+                    latency_ms=vlm_latency,
+                    status="error",
+                    error=str(exc),
                 )
                 logger.error("[video_review] VLM call failed: %s — FAILING review (no silent pass-through)", exc)
                 return VideoReviewResult(
@@ -575,6 +600,18 @@ class VideoReviewAgent(_VideoReviewAgentBase):
                 raw_response=raw_text,
                 raw_thinking=raw_thinking,
             )
+            trace_llm_call(
+                trace_name=f"video_review_escalation:{model_alias}",
+                model=ollama_resp.model,
+                input_messages=[{"role": m["role"], "content": "(image frames omitted)" if isinstance(m.get("content"), list) else m.get("content", "")} for m in messages],
+                output=raw_text,
+                tokens_in=ollama_resp.tokens_in,
+                tokens_out=ollama_resp.tokens_out,
+                cost_usd=0.0,
+                latency_ms=vlm_latency,
+                status="success",
+                thinking=raw_thinking,
+            )
 
             result = _parse_review_response(raw_text, model_alias)
             return VideoReviewResult(
@@ -600,6 +637,18 @@ class VideoReviewAgent(_VideoReviewAgentBase):
                 error=str(exc),
                 model_type="local",
                 provider="ollama",
+            )
+            trace_llm_call(
+                trace_name=f"video_review_escalation:{model_alias}",
+                model=model_alias,
+                input_messages=[{"role": m["role"], "content": "(image frames omitted)" if isinstance(m.get("content"), list) else m.get("content", "")} for m in messages],
+                output=None,
+                tokens_in=0,
+                tokens_out=0,
+                cost_usd=0.0,
+                latency_ms=vlm_latency,
+                status="error",
+                error=str(exc),
             )
             logger.error("[video_review] Escalation VLM call failed: %s", exc)
             return VideoReviewResult(

@@ -39,6 +39,7 @@ from kairos.models.contracts import (
 from kairos.services.async_subprocess import run_async
 from kairos.services.llm_config import get_step_config
 from kairos.services.llm_routing import _record_llm_call
+from kairos.ai.tracing.sinks.langfuse_sink import trace_llm_call
 
 logger = logging.getLogger(__name__)
 

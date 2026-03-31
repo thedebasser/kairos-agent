@@ -97,6 +97,35 @@ services:
       retries: 5
       start_period: 10s
 
+  # ---------------------------------------------------------------------------
+  # Langfuse — LLM Observability & Tracing
+  # ---------------------------------------------------------------------------
+  # Web UI:  http://localhost:3000
+  # Sign up on first visit to create org + project, then copy the
+  # public/secret keys into .env (LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY).
+  # ---------------------------------------------------------------------------
+  langfuse:
+    image: langfuse/langfuse:2
+    container_name: kairos-langfuse
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://kairos:${POSTGRES_PASSWORD:-changeme}@postgres:5432/kairos
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-kairos-langfuse-secret-change-me}
+      SALT: ${LANGFUSE_SALT:-kairos-langfuse-salt-change-me}
+      TELEMETRY_ENABLED: "false"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/public/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
 volumes:
   postgres_data:
   redis_data:
