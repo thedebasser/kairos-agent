@@ -84,14 +84,7 @@ steps:
     description: >
       Picks the next video category based on rotation rules
       (hard block, soft block, boost, streak break).
-    local_model: ollama/mistral:7b-instruct-q4_0
-    cloud_model: claude-sonnet-4-6
-    litellm_alias_local: idea-agent-local
-    litellm_alias_cloud: concept-developer   # reuses the same Claude model
-    call_pattern: direct                      # currently direct; falls back to
-                                              # programmatic category rotation on error
-    quality_gate: "N/A — programmatic fallback on any LLM failure"
-    fallback_note: "Falls back to rule-based category rotation (no LLM needed)"
+    local_model: ollama/glm-4.7-flash:latest
 
   concept_developer:
     agent: idea_agent
@@ -99,7 +92,7 @@ steps:
       Generates a full ConceptBrief (title, hook, visual brief, physics params)
       from the selected category. Local model handles creative structured output;
       falls back to cloud if quality gate fails.
-    local_model: ollama/qwen3.5:9b
+    local_model: ollama/glm-4.7-flash:latest
     cloud_model: claude-sonnet-4-6
     litellm_alias_local: concept-developer-local
     litellm_alias_cloud: concept-developer
@@ -128,7 +121,7 @@ steps:
       Adjusts simulation parameters after a failed validation pass.
       Mechanical edits (tweak numbers, fix imports) — local model can handle this.
       Falls back to cloud if local output fails the quality gate.
-    local_model: ollama/mistral:7b-instruct-q4_0
+    local_model: ollama/glm-4.7-flash:latest
     cloud_model: claude-sonnet-4-6
     litellm_alias_local: sim-param-adjust
     litellm_alias_cloud: simulation-debugger
@@ -158,14 +151,13 @@ steps:
     description: >
       Generates a YouTube/TikTok title (<80 chars). Simple language task —
       within local model capability.
-    local_model: ollama/llama3.1:8b
+    local_model: ollama/glm-4.7-flash:latest
     cloud_model: claude-sonnet-4-6
     litellm_alias_local: title-writer
     litellm_alias_cloud: caption-writer       # reuses caption-writer alias for cloud
     call_pattern: direct                      # currently direct local; concept fallback on fail
     quality_gate: "N/A — currently direct call with concept.title fallback"
     fallback_note: "Falls back to concept.title if LLM call fails"
-
   # ── Validation (planned, not yet implemented) ───────────────────────────
 
   frame_inspector:
@@ -305,7 +297,7 @@ steps:
       Applies to marble and domino pipelines. Toggle 'enabled' to false
       to use code-only mode (no LLM, manual scripts only).
     enabled: true                             # set false for code-only mode (no LLM)
-    local_model: ollama/qwen3.5:27b
+    local_model: ollama/glm-4.7-flash:latest
     cloud_model: claude-sonnet-4-6
     litellm_alias_local: blender-coder-default
     litellm_alias_cloud: simulation-first-pass
@@ -315,7 +307,6 @@ steps:
     fallback_note: >
       Cloud output is recorded as training data. If both fail, pipeline
       errors out.
-    # Alternative models (switch via litellm_alias_local)
     alternatives:
       option_2:
         model: ollama/devstral-small:24b

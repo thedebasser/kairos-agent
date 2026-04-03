@@ -307,7 +307,7 @@ litellm.set_verbose = False
 
 def _load_model_alias_map() -> dict[str, str]:
     """Build alias → real-model map from litellm_config.yaml."""
-    config_path = Path(__file__).resolve().parent.parent.parent.parent / "litellm_config.yaml"
+    config_path = Path(__file__).resolve().parent.parent.parent.parent.parent / "litellm_config.yaml"
     if not config_path.exists():
         logger.warning("litellm_config.yaml not found at %s — no aliases loaded", config_path)
         return {}
@@ -328,7 +328,7 @@ def _load_model_alias_map() -> dict[str, str]:
 
 def _load_model_api_bases() -> dict[str, str]:
     """Build alias → api_base map from litellm_config.yaml."""
-    config_path = Path(__file__).resolve().parent.parent.parent.parent / "litellm_config.yaml"
+    config_path = Path(__file__).resolve().parent.parent.parent.parent.parent / "litellm_config.yaml"
     if not config_path.exists():
         return {}
     try:

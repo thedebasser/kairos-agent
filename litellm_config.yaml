@@ -15,7 +15,7 @@ model_list:
 
   - model_name: concept-developer-local
     litellm_params:
-      model: ollama/qwen3.5:9b
+      model: ollama/glm-4.7-flash:latest
       api_base: http://localhost:11434
 
   - model_name: simulation-first-pass
@@ -37,17 +37,17 @@ model_list:
 
   - model_name: idea-agent-local
     litellm_params:
-      model: ollama/mistral:7b-instruct-q4_0
+      model: ollama/glm-4.7-flash:latest
       api_base: http://localhost:11434
 
   - model_name: sim-param-adjust
     litellm_params:
-      model: ollama/mistral:7b-instruct-q4_0
+      model: ollama/glm-4.7-flash:latest
       api_base: http://localhost:11434
 
   - model_name: title-writer
     litellm_params:
-      model: ollama/llama3.1:8b
+      model: ollama/glm-4.7-flash:latest
       api_base: http://localhost:11434
 
   - model_name: frame-inspector
@@ -71,19 +71,19 @@ model_list:
 
   - model_name: audio-reviewer-default
     litellm_params:
-      model: ollama/qwen3.5:9b
+      model: ollama/glm-4.7-flash:latest
       api_base: http://localhost:11434
 
   - model_name: audio-reviewer-escalation
     litellm_params:
-      model: ollama/qwen3.5:35b-a3b
+      model: ollama/glm-4.7-flash:latest
       api_base: http://localhost:11434
 
   # ─── Blender Coding models (Ollama) ───────────────────────────────────────
 
   - model_name: blender-coder-default
     litellm_params:
-      model: ollama/qwen3.5:27b
+      model: ollama/glm-4.7-flash:latest
       api_base: http://localhost:11434
 
   - model_name: blender-coder-option2

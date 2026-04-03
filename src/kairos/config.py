@@ -93,7 +93,7 @@ class Settings(BaseSettings):
     # --- Langfuse ---
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
-    langfuse_host: str = "http://localhost:3000"
+    langfuse_host: str = "http://localhost:3001"
 
     # --- Discord ---
     discord_webhook_url: str = ""
@@ -167,7 +167,7 @@ class Settings(BaseSettings):
         if self.knowledge_dir is None:
             self.knowledge_dir = self.project_root / "knowledge"
         if self.music_dir is None:
-            self.music_dir = self.project_root / "music"
+            self.music_dir = self.project_root / "assets" / "music"
         if self.output_dir is None:
             self.output_dir = self.project_root / "output"
 

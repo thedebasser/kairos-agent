@@ -112,15 +112,15 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "3000:3000"
+      - "3001:3000"
     environment:
-      DATABASE_URL: postgresql://kairos:${POSTGRES_PASSWORD:-changeme}@postgres:5432/kairos
-      NEXTAUTH_URL: http://localhost:3000
+      DATABASE_URL: postgresql://kairos:${POSTGRES_PASSWORD:-changeme}@postgres:5432/langfuse
+      NEXTAUTH_URL: http://localhost:3001
       NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-kairos-langfuse-secret-change-me}
       SALT: ${LANGFUSE_SALT:-kairos-langfuse-salt-change-me}
       TELEMETRY_ENABLED: "false"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/public/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://$(hostname -i | awk '{print $1}'):3000/api/public/health || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 5
