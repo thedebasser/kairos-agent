@@ -387,6 +387,7 @@ def trace_llm_call(
     *,
     trace_name: str,
     model: str,
+    model_resolved: str | None = None,
     input_messages: list[dict[str, str]],
     output: Any,
     tokens_in: int = 0,
@@ -440,11 +441,16 @@ def trace_llm_call(
             else:
                 output_str = str(output)[:5000]
 
+        # Use the resolved model for Langfuse so price lookup works;
+        # keep the alias in metadata for human reference.
+        langfuse_model = model_resolved or model
+
         gen_metadata: dict[str, Any] = {
             "cost_usd": cost_usd,
             "latency_ms": latency_ms,
             "status": status,
             "error": error,
+            "model_alias": model,
             **(metadata or {}),
         }
         if thinking:
@@ -477,7 +483,7 @@ def trace_llm_call(
 
         parent.generation(
             name=f"{trace_name}_generation",
-            model=model,
+            model=langfuse_model,
             input=input_messages,
             output=output_str,
             usage={

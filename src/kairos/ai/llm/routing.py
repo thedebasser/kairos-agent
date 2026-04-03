@@ -677,6 +677,7 @@ async def call_llm_code(
             trace_llm_call(
                 trace_name=f"call_llm_code:{model}",
                 model=model,
+                model_resolved=resolved_model,
                 input_messages=messages,
                 output=result,
                 tokens_in=tokens_in,
@@ -846,6 +847,7 @@ async def call_llm(
             trace_llm_call(
                 trace_name=f"call_llm:{model}",
                 model=model,
+                model_resolved=resolved_model,
                 input_messages=messages,
                 output=result,
                 tokens_in=tokens_in,
@@ -977,6 +979,7 @@ async def call_with_quality_fallback(
                 trace_llm_call(
                     trace_name=f"quality_fallback:{primary_model}",
                     model=primary_model,
+                    model_resolved=resolved_primary,
                     input_messages=messages,
                     output=result,
                     latency_ms=latency,
@@ -1001,6 +1004,7 @@ async def call_with_quality_fallback(
             trace_llm_call(
                 trace_name=f"quality_fallback:{primary_model}",
                 model=primary_model,
+                model_resolved=resolved_primary,
                 input_messages=messages,
                 output=result,
                 latency_ms=latency,
@@ -1030,6 +1034,7 @@ async def call_with_quality_fallback(
             trace_llm_call(
                 trace_name=f"quality_fallback:{primary_model}",
                 model=primary_model,
+                model_resolved=resolved_primary,
                 input_messages=messages,
                 output=None,
                 status="error",
@@ -1093,6 +1098,7 @@ async def call_with_quality_fallback(
     trace_llm_call(
         trace_name=f"quality_fallback:{fallback_model}",
         model=fallback_model,
+        model_resolved=resolved_fallback,
         input_messages=messages,
         output=cloud_result,
         tokens_in=fb_tokens_in,
