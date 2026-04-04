@@ -90,6 +90,7 @@ class LangfuseSink:
         self._run_traces: dict[str, Any] = {}       # run_id -> langfuse trace
         self._step_spans: dict[str, Any] = {}        # f"{run_id}:{step_name}" -> langfuse span
         self._run_metadata: dict[str, dict[str, Any]] = {}  # accumulated data per run
+        self._current_step_name: str | None = None   # active step for generation nesting
 
     # -- TracingSink protocol ------------------------------------------------
 
@@ -224,6 +225,7 @@ class LangfuseSink:
         )
         key = f"{event.run_id}:{event.step_name}"
         self._step_spans[key] = span
+        self._current_step_name = event.step_name
         logger.debug("Langfuse span created: step=%s (span key=%s)", event.step_name, key)
 
     def _on_step_completed(self, event: Any) -> None:
@@ -245,6 +247,7 @@ class LangfuseSink:
         )
         # Clean up
         self._step_spans.pop(key, None)
+        self._current_step_name = None
         logger.debug("Langfuse span ended: step=%s status=%s", event.step_name, event.status)
 
     def _on_llm_call_completed(self, event: Any) -> None:
@@ -466,10 +469,15 @@ def trace_llm_call(
         parent: Any = None
         tracer = get_tracer()
         if tracer and tracer._run_id:
-            # Look for the sink's run trace
+            # Prefer the active step span so generations nest properly;
+            # fall back to the run trace if no step is active.
             for sink in tracer._sinks:
                 if isinstance(sink, LangfuseSink):
-                    parent = sink._run_traces.get(tracer._run_id)
+                    if sink._current_step_name:
+                        key = f"{tracer._run_id}:{sink._current_step_name}"
+                        parent = sink._step_spans.get(key) or sink._run_traces.get(tracer._run_id)
+                    else:
+                        parent = sink._run_traces.get(tracer._run_id)
                     break
 
         if parent is None:

@@ -1024,13 +1024,14 @@ async def call_with_quality_fallback(
                 model_type=primary_caps.model_type,
                 provider=primary_caps.family_name,
             )
-        except Exception:
+        except Exception as exc:
             logger.warning(
                 "%s failed, falling back to %s",
                 primary_model,
                 fallback_model,
                 exc_info=True,
             )
+            _exc_detail = f"{type(exc).__name__}: {exc}"
             trace_llm_call(
                 trace_name=f"quality_fallback:{primary_model}",
                 model=primary_model,
@@ -1038,7 +1039,7 @@ async def call_with_quality_fallback(
                 input_messages=messages,
                 output=None,
                 status="error",
-                error=f"Exception, falling back to {fallback_model}",
+                error=f"{_exc_detail} — falling back to {fallback_model}",
             )
             _record_llm_call(
                 model_alias=primary_model,
@@ -1048,7 +1049,7 @@ async def call_with_quality_fallback(
                 tokens_in=0, tokens_out=0, cost_usd=0.0,
                 latency_ms=0,
                 status="error",
-                error=f"Exception, falling back to {fallback_model}",
+                error=f"{_exc_detail} — falling back to {fallback_model}",
                 model_type=primary_caps.model_type,
                 provider=primary_caps.family_name,
             )
