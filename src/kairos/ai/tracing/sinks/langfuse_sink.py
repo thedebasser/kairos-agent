@@ -97,6 +97,7 @@ class LangfuseSink:
     def on_event(self, event: Any) -> None:
         """Dispatch an event to Langfuse and the metrics store."""
         from kairos.ai.tracing.events import (
+            ActionTaken,
             ConsoleMessage,
             Decision,
             LLMCallCompleted,
@@ -127,6 +128,8 @@ class LangfuseSink:
                 self._on_decision(event)
             elif isinstance(event, ConsoleMessage):
                 self._on_console(event)
+            elif isinstance(event, ActionTaken):
+                self._on_action_taken(event)
 
             # Always feed local metrics store
             self._record_local_metrics(event)
@@ -359,6 +362,34 @@ class LangfuseSink:
             name=f"console:{event.level}",
             metadata={"message": event.message, "step_name": event.step_name},
             level=level_map.get(event.level, "DEFAULT"),
+        )
+
+    def _on_action_taken(self, event: Any) -> None:
+        """Record a tool/sub-operation invocation as an event on the step span."""
+        key = f"{event.run_id}:{event.step_name}" if event.step_name else None
+        parent = (self._step_spans.get(key) if key else None) or self._run_traces.get(event.run_id)
+        if parent is None:
+            return
+
+        level = "ERROR" if event.status == "error" else "DEFAULT"
+        status_prefix = "[OK]" if event.status == "success" else f"[{event.status.upper()}]"
+        name = f"tool:{event.tool}"
+
+        parent.event(
+            name=name,
+            metadata={
+                "tool": event.tool,
+                "input": event.input_summary,
+                "output": event.output_summary,
+                "status": event.status,
+                "duration_ms": event.duration_ms,
+                "label": f"{status_prefix} {event.tool} — {event.output_summary}"[:200],
+            },
+            level=level,
+        )
+        logger.debug(
+            "Langfuse action: %s step=%s status=%s dur=%dms",
+            event.tool, event.step_name, event.status, event.duration_ms,
         )
 
     # -- Local metrics helper -----------------------------------------------

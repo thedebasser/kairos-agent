@@ -187,6 +187,39 @@ class ConsoleMessage(TraceEvent):
 
 
 # ---------------------------------------------------------------------------
+# Agent tool / sub-operation events
+# ---------------------------------------------------------------------------
+
+class ActionTaken(TraceEvent):
+    """Records a discrete tool invocation within a pipeline step.
+
+    Captures sub-operations that are not LLM calls — Blender subprocess
+    runs, FFmpeg compositing, file reads, validation checks, etc.  Mirrors
+    the kind of breadcrumb trail visible in IDE agent work panels.
+
+    Examples::
+
+        tracer.action("blender:generate_course",
+                      input_summary="archetype=s_curve, dominos=150",
+                      output_summary="domino_course.blend (1.2 MB)",
+                      status="success", duration_ms=8340)
+
+        tracer.action("blender:validate",
+                      input_summary="domino_course.blend",
+                      output_summary="FAILED: chain_propagation, spacing",
+                      status="error", duration_ms=3100)
+    """
+
+    event_type: Literal["action_taken"] = "action_taken"
+    step_name: str
+    tool: str                        # e.g. "blender:generate_course"
+    input_summary: str = ""          # brief description of what was sent in
+    output_summary: str = ""         # brief description of result / output
+    status: Literal["success", "error", "skipped"] = "success"
+    duration_ms: int = 0
+
+
+# ---------------------------------------------------------------------------
 # Type union for deserialization
 # ---------------------------------------------------------------------------
 
@@ -200,6 +233,7 @@ EVENT_TYPES: dict[str, type[TraceEvent]] = {
     "prompt_rendered": PromptRendered,
     "decision": Decision,
     "console": ConsoleMessage,
+    "action_taken": ActionTaken,
 }
 
 

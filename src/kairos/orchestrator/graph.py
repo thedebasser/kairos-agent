@@ -425,23 +425,54 @@ async def video_editor_node(state: dict[str, Any]) -> dict[str, Any]:
             )
 
             logger.info("[video_editor_node] Selecting music track...")
+            _t0 = time.monotonic()
             music = await agent.select_music(concept, stats)
+            tracer.action(
+                "music:select",
+                input_summary=f"concept={concept.title[:60]}",
+                output_summary=f"{music.track_id} | {music.bpm} BPM | {music.mood}",
+                status="success",
+                duration_ms=int((time.monotonic() - _t0) * 1000),
+            )
             logger.info("[video_editor_node] OK Music: %s", music.track_id)
 
             # Generate captions
             logger.info("[video_editor_node] Generating captions...")
+            _t0 = time.monotonic()
             theme_name = state.get("theme_name", "")
             captions = await agent.generate_captions(concept, theme_name=theme_name)
+            _caption_texts = " / ".join(c.text for c in captions.captions[:3]) if captions.captions else ""
+            tracer.action(
+                "captions:generate",
+                input_summary=f"concept={concept.title[:60]}, theme={theme_name or 'none'}",
+                output_summary=f"{len(captions.captions)} captions: {_caption_texts[:120]}",
+                status="success",
+                duration_ms=int((time.monotonic() - _t0) * 1000),
+            )
             logger.info("[video_editor_node] OK Captions generated (%d captions)", len(captions.captions))
 
             # Compose video
             raw_video_path = state.get("raw_video_path", "")
             logger.info("[video_editor_node] Composing final video with FFmpeg...")
+            _t0 = time.monotonic()
             video_output = await agent.compose_video(
                 raw_video_path=raw_video_path,
                 music=music,
                 captions=captions,
                 concept=concept,
+            )
+            _final_size = 0
+            try:
+                import os as _os
+                _final_size = _os.path.getsize(video_output.final_video_path) // 1024 // 1024
+            except Exception:
+                pass
+            tracer.action(
+                "ffmpeg:compose",
+                input_summary=f"raw={raw_video_path.split('/')[-1] if raw_video_path else '?'}, music={music.track_id}",
+                output_summary=f"{video_output.final_video_path.split('/')[-1]}  ({_final_size}MB)",
+                status="success",
+                duration_ms=int((time.monotonic() - _t0) * 1000),
             )
         except PipelineError as exc:
             logger.error("[video_editor_node] Video assembly failed: %s", exc)

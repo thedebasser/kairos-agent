@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any, Generator
 
 from kairos.ai.tracing.events import (
+    ActionTaken,
     ConsoleMessage,
     Decision,
     LLMCallCompleted,
@@ -325,6 +326,7 @@ class RunTracer:
         self._total_cost: float = 0.0
         self._total_llm_calls: int = 0
         self._initialised: bool = False
+        self._current_step_name: str = ""   # active step, used by tracer.action()
 
     # -- Sink registration -------------------------------------------------
 
@@ -422,6 +424,7 @@ class RunTracer:
         self._emit(start_event, console=True)
 
         span = StepSpan(self, step_name, step_number, attempt)
+        self._current_step_name = step_name
 
         try:
             yield span
@@ -429,6 +432,7 @@ class RunTracer:
             span.fail(str(exc))
             raise
         finally:
+            self._current_step_name = ""
             completed_event = StepCompleted(
                 run_id=self._run_id,
                 step_name=step_name,
@@ -440,6 +444,43 @@ class RunTracer:
                 errors=span.errors,
             )
             self._emit(completed_event, console=True)
+
+    # -- Tool / sub-operation logging ------------------------------------
+
+    def action(
+        self,
+        tool: str,
+        *,
+        input_summary: str = "",
+        output_summary: str = "",
+        status: str = "success",
+        duration_ms: int = 0,
+        step_name: str = "",
+    ) -> None:
+        """Emit an ActionTaken event for a discrete sub-operation.
+
+        Can be called from anywhere that has access to the tracer singleton.
+        Uses the active step name if ``step_name`` is not provided.
+
+        Example::
+
+            tracer.action("blender:generate_course",
+                          input_summary="archetype=s_curve",
+                          output_summary="domino_course.blend (1.2 MB)",
+                          status="success", duration_ms=8340)
+        """
+        effective_step = step_name or self._current_step_name
+        self._emit(
+            ActionTaken(
+                run_id=self._run_id,
+                step_name=effective_step,
+                tool=tool,
+                input_summary=input_summary,
+                output_summary=output_summary,
+                status=status,  # type: ignore[arg-type]
+                duration_ms=duration_ms,
+            ),
+        )
 
     # -- Console logging ---------------------------------------------------
 
