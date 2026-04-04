@@ -458,6 +458,12 @@ def call_ollama_direct(
     }
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
+        # Some thinking models (e.g. GLM-4.7-flash) ignore /nothink and only
+        # respect an explicit {"think": false} API option.  Add it when the
+        # model capabilities class confirms thinking support.
+        caps = get_capabilities(resolved)
+        if caps.supports_thinking:
+            payload["think"] = False
 
     logger.info(
         "[ollama_direct] Calling %s (json_mode=%s, timeout=%ds, max_tokens=%d)",
