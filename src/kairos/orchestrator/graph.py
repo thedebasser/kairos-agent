@@ -783,6 +783,19 @@ def route_after_video_review(state: dict[str, Any]) -> str:
     if passed:
         return "audio_review"
 
+    # If every issue is reviewer_error (e.g. model 404, model not pulled),
+    # re-simulating won't fix the reviewer — proceed to audio review.
+    issues = review_data.get("issues", []) if isinstance(review_data, dict) else []
+    if issues and all(
+        (i.get("category") if isinstance(i, dict) else getattr(i, "category", None)) == "reviewer_error"
+        for i in issues
+    ):
+        logger.warning(
+            "Video review failed due to reviewer infrastructure error (e.g. model unavailable) — "
+            "skipping re-simulation and proceeding to audio review"
+        )
+        return "audio_review"
+
     # Failed — try re-simulation if attempts remain
     if attempts < MAX_VIDEO_REVIEW_ATTEMPTS:
         logger.info("Video review failed (attempt %d/%d) — routing back to simulation_agent",
