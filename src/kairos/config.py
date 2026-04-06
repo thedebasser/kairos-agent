@@ -129,6 +129,35 @@ class Settings(BaseSettings):
     # --- Environment / Theming ---
     freesound_api_key: str = ""  # Optional: enables collision SFX
 
+    # --- Skill Library / Assets ---
+    skills_dir: Path | None = Field(default=None)
+    asset_catalogue_path: Path | None = Field(default=None)
+    asset_models_dir: Path | None = Field(default=None)
+    asset_textures_dir: Path | None = Field(default=None)
+    asset_hdris_dir: Path | None = Field(default=None)
+
+    # --- Blender ---
+    blender_render_engine: str = "BLENDER_EEVEE"
+    blender_physics_engine: str = "BULLET"
+    blender_substeps_per_frame: int = 5
+    blender_solver_iterations: int = 10
+
+    # --- Domino Defaults ---
+    domino_height_m: float = 0.08
+    domino_width_m: float = 0.04
+    domino_depth_m: float = 0.006
+    domino_mass_kg: float = 0.02
+    domino_friction: float = 0.8
+    domino_restitution: float = 0.1
+
+    # --- Pipeline Constraints ---
+    content_type: str = "domino"
+    max_gradient_domino_deg: float = 30.0
+    max_gradient_marble_deg: float = 45.0
+    min_gap_between_objects_m: float = 0.3
+    scene_bounds_m: list[float] = Field(default_factory=lambda: [10.0, 10.0, 5.0])
+    course_length_target_m: float = 10.0
+
     # --- Calibration ---
     calibration_enabled: bool = Field(
         default=False,
@@ -184,6 +213,18 @@ class Settings(BaseSettings):
             self.output_dir = self.project_root / "output"
         if self.calibration_output_dir is None:
             self.calibration_output_dir = self.project_root / "output" / "calibration"
+
+        # Skill library / asset paths
+        if self.skills_dir is None:
+            self.skills_dir = self.project_root / "src" / "kairos" / "skills"
+        if self.asset_catalogue_path is None:
+            self.asset_catalogue_path = self.project_root / "assets" / "catalogue.yaml"
+        if self.asset_models_dir is None:
+            self.asset_models_dir = self.project_root / "assets" / "models"
+        if self.asset_textures_dir is None:
+            self.asset_textures_dir = self.project_root / "assets" / "textures"
+        if self.asset_hdris_dir is None:
+            self.asset_hdris_dir = self.project_root / "assets" / "hdris"
 
         # Resolve FFmpeg paths once at startup
         if not self.ffmpeg_path:
