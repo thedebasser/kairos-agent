@@ -43,6 +43,7 @@ class FailureMode(str, Enum):
     FLOATING = "floating"
     TRIGGER_MISS = "trigger_miss"
     INCOMPLETE_PROPAGATION = "incomplete_propagation"
+    SCRIPT_CRASH = "script_crash"
     UNKNOWN = "unknown"
 
 

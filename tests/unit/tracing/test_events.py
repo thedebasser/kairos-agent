@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from kairos.ai.tracing.events import (
     EVENT_TYPES,
+    ActionTaken,
     ConsoleMessage,
     Decision,
     LLMCallCompleted,
@@ -152,7 +153,20 @@ class TestParseEvent:
     """Test the parse_event deserialization function."""
 
     def test_all_event_types_registered(self):
-        assert len(EVENT_TYPES) == 9
+        assert len(EVENT_TYPES) == 10
+
+    def test_action_taken(self):
+        e = ActionTaken(
+            run_id="r",
+            step_name="sim",
+            tool="blender:generate_course",
+            input_summary="archetype=s_curve",
+            output_summary="domino_course.blend",
+            status="success",
+            duration_ms=5000,
+        )
+        assert e.event_type == "action_taken"
+        assert e.tool == "blender:generate_course"
 
     def test_parse_unknown_raises(self):
         try:

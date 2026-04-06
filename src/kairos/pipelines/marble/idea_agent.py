@@ -159,8 +159,8 @@ class MarbleIdeaAgent(IdeaAgent):
         try:
             model = get_step_config("concept_developer").resolve_model()
         except Exception:
-            # Fallback: use cloud model directly
-            model = "anthropic/claude-sonnet-4-20250514"
+            # Fallback: resolve_model already respects enable_cloud_fallback
+            model = "concept-developer-local"
             logger.warning("Could not resolve concept_developer model, using fallback: %s", model)
 
         result = await call_llm(

@@ -271,6 +271,7 @@ async def _send_discord_notification(output_id: str, action: str, feedback: str)
     settings = get_settings()
     webhook_url = getattr(settings, "discord_webhook_url", None)
     if not webhook_url:
+        logger.debug("Discord webhook URL not configured — skipping review notification for %s", output_id)
         return
 
     import httpx
@@ -301,6 +302,7 @@ async def _send_discord_new_review(output_id: str, item: dict[str, Any]) -> None
     settings = get_settings()
     webhook_url = getattr(settings, "discord_webhook_url", None)
     if not webhook_url:
+        logger.debug("Discord webhook URL not configured — skipping new-review notification for %s", output_id)
         return
 
     import httpx

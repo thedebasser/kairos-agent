@@ -514,14 +514,17 @@ async def human_review_node(state: dict[str, Any]) -> dict[str, Any]:
 
     For automated testing, the review_action can be pre-set.
     """
-    logger.info("[human_review_node] Video pending review")
-
     # If review_action is already set (e.g., from test or resumed state), process it
     review_action = state.get("review_action")
     if review_action:
-        return {"status": PipelineStatus.PENDING_REVIEW.value}
+        logger.info(
+            "[human_review_node] Resuming with review_action=%s (output=%s)",
+            review_action,
+            state.get("output_id", "unknown"),
+        )
+    else:
+        logger.info("[human_review_node] Video pending review — pipeline will pause")
 
-    # Otherwise, mark as pending — pipeline will be resumed after review
     return {"status": PipelineStatus.PENDING_REVIEW.value}
 
 
@@ -730,22 +733,27 @@ def route_after_review(state: dict[str, Any]) -> str:
 
     if review_action is None:
         # Pipeline pauses here — will be resumed after human review
+        logger.info("[route_after_review] No review action yet — pausing pipeline")
         return "__end__"
 
     if review_action == ReviewAction.APPROVED.value:
+        logger.info("[route_after_review] Approved — routing to publish_queue")
         return "publish_queue"
 
     if review_action == ReviewAction.BAD_CONCEPT.value:
+        logger.info("[route_after_review] Bad concept — routing to idea_agent for new concept")
         return "idea_agent"
 
     if review_action == ReviewAction.BAD_SIMULATION.value:
+        logger.info("[route_after_review] Bad simulation — routing to simulation_agent")
         return "simulation_agent"
 
     if review_action in (ReviewAction.BAD_EDIT.value, ReviewAction.REQUEST_REEDIT.value):
+        logger.info("[route_after_review] %s — routing to video_editor_agent", review_action)
         return "video_editor_agent"
 
     # Unknown action — fail safe
-    logger.warning("Unknown review action: %s", review_action)
+    logger.warning("[route_after_review] Unknown review action: %s — ending pipeline", review_action)
     return "__end__"
 
 
@@ -775,12 +783,17 @@ def route_after_video_review(state: dict[str, Any]) -> str:
 
     # If reviewer errored (no result), proceed to audio review
     if review_data is None:
-        logger.warning("Video review produced no result — proceeding to audio review")
+        logger.warning(
+            "[route_after_video_review] Video review produced no result (attempt %d) "
+            "— proceeding to audio review without video quality check",
+            attempts,
+        )
         return "audio_review"
 
     passed = review_data.get("passed", True) if isinstance(review_data, dict) else True
 
     if passed:
+        logger.info("[route_after_video_review] Video passed review — proceeding to audio review")
         return "audio_review"
 
     # If every issue is reviewer_error (e.g. model 404, model not pulled),
@@ -790,9 +803,12 @@ def route_after_video_review(state: dict[str, Any]) -> str:
         (i.get("category") if isinstance(i, dict) else getattr(i, "category", None)) == "reviewer_error"
         for i in issues
     ):
-        logger.warning(
-            "Video review failed due to reviewer infrastructure error (e.g. model unavailable) — "
-            "skipping re-simulation and proceeding to audio review"
+        logger.error(
+            "[route_after_video_review] Video review failed due to reviewer infrastructure "
+            "error (e.g. model unavailable) after %d attempt(s) — skipping re-simulation. "
+            "Issues: %s",
+            attempts,
+            [i.get("description", str(i)) if isinstance(i, dict) else str(i) for i in issues],
         )
         return "audio_review"
 
@@ -820,7 +836,11 @@ def route_after_audio_review(state: dict[str, Any]) -> str:
 
     # If reviewer errored (no result), proceed to human review
     if review_data is None:
-        logger.warning("Audio review produced no result — proceeding to human review")
+        logger.warning(
+            "[route_after_audio_review] Audio review produced no result (attempt %d) "
+            "— proceeding to human review without audio quality check",
+            attempts,
+        )
         return "human_review"
 
     passed = review_data.get("passed", True) if isinstance(review_data, dict) else True

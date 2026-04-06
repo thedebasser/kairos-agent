@@ -273,6 +273,7 @@ async def run_calibration(
     resolved = False
     last_anomalies = 0  # physics_anomalies from the passing smoke test
     _consecutive_perceptual_only_failures = 0  # smoke passed but VLM disagreed
+    _consecutive_stuck_failures = 0  # track consecutive identical-param failures
 
     for iteration in range(1, max_iterations + 1):
         iter_dir = _iteration_dir(sid, iteration)
@@ -342,19 +343,46 @@ async def run_calibration(
             timeout_sec=300,
         )
 
+        validation = smoke_result.get("json_output") or {}
+
+        # ── Fail loudly on empty / null validation ──────────────────
+        # If the smoke test produced no JSON at all, the Blender script
+        # crashed before it could report results.  Treat this as a hard
+        # error — log at ERROR level, record as SCRIPT_CRASH, and skip
+        # the correction loop (the parameters are irrelevant when the
+        # script itself is broken).
+        if not validation:
+            stderr_tail = smoke_result.get("stderr", "")[-500:]
+            logger.error(
+                "[calibration] SCRIPT CRASH on iter %d — smoke test produced "
+                "no output (empty validation). This is likely a Blender "
+                "script error, NOT a physics tuning problem.\n"
+                "  stderr (last 500 chars): %s",
+                iteration, stderr_tail or "<empty>",
+            )
+            record = IterationRecord(
+                iteration=iteration,
+                params_used=current_params,
+                validation_passed=False,
+                completion_ratio=0.0,
+                failure_modes=[FailureMode.SCRIPT_CRASH],
+                failure_details=(
+                    f"Smoke test script crashed with no output. "
+                    f"stderr: {stderr_tail or '<empty>'}"
+                ),
+            )
+            session.iterations.append(record)
+            # No point correcting physics params — the script didn't run.
+            # Jump straight to UNRESOLVED.
+            break
+
         if smoke_result["returncode"] != 0 and smoke_result.get("json_output") is not None:
             logger.warning(
                 "[calibration] Smoke test exited with code %d on iter %d but JSON was parsed "
                 "(Blender 5.x background mode quirk — using parsed output)",
                 smoke_result["returncode"], iteration,
             )
-        elif smoke_result["returncode"] != 0:
-            logger.error(
-                "[calibration] Smoke test crashed on iter %d with no output: %s",
-                iteration, smoke_result.get("stderr", "")[-300:],
-            )
 
-        validation = smoke_result.get("json_output") or {}
         validation_file = iter_dir / "validation.json"
         validation_file.write_text(json.dumps(validation, indent=2), encoding="utf-8")
 
@@ -460,6 +488,41 @@ async def run_calibration(
             for k in correction
             if correction[k] != current_params.get(k)
         }
+
+        # ── Stuck-loop breaker ──────────────────────────────────────
+        # If the correction delta is empty (params unchanged), the correction
+        # engine has exhausted its strategies for this failure mode.  Track
+        # consecutive stuck iterations and escalate every 5 failures by
+        # broadening the parameter exploration.
+        if not correction_delta:
+            _consecutive_stuck_failures += 1
+            if _consecutive_stuck_failures % 5 == 0:
+                logger.warning(
+                    "[calibration] Stuck-loop detected on iter %d "
+                    "(%d consecutive identical-param failures). "
+                    "Escalating to broader parameter exploration.",
+                    iteration, _consecutive_stuck_failures,
+                )
+                # Broaden: spacing, impulse, friction, mass
+                correction["spacing_ratio"] = max(
+                    0.20, correction.get("spacing_ratio", 0.35) - 0.04
+                )
+                correction["trigger_impulse"] = min(
+                    8.0, correction.get("trigger_impulse", 1.5) + 1.0
+                )
+                correction["domino_friction"] = min(
+                    0.9, correction.get("domino_friction", 0.6) + 0.1
+                )
+                correction["domino_mass"] = min(
+                    1.0, correction.get("domino_mass", 0.3) + 0.1
+                )
+                correction_delta = {
+                    k: round(correction[k] - current_params.get(k, 0), 6)
+                    for k in correction
+                    if correction[k] != current_params.get(k)
+                }
+        else:
+            _consecutive_stuck_failures = 0
 
         correction_file = iter_dir / "correction.json"
         correction_file.write_text(
