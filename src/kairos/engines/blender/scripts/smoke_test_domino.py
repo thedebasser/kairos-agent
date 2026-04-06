@@ -79,7 +79,91 @@ def _count_fallen(dominos: list[bpy.types.Object], threshold_deg: float = 30.0) 
     return fallen
 
 
-def run_smoke_test(frame_count: int = 0) -> dict[str, Any]:
+def _get_per_domino_data(dominos: list[bpy.types.Object]) -> list[dict[str, Any]]:
+    """Collect per-domino physics data for calibration diagnostics.
+
+    Returns a list of dicts with position, tilt, and velocity info
+    for each domino at the current frame.
+    """
+    dg = bpy.context.evaluated_depsgraph_get()
+    data: list[dict[str, Any]] = []
+    for d in dominos:
+        d_eval = d.evaluated_get(dg)
+        mw = d_eval.matrix_world
+        local_z = mw.to_3x3() @ Vector((0, 0, 1))
+        tilt_rad = local_z.angle(Vector((0, 0, 1)), 0.0)
+        pos = mw.translation
+        data.append({
+            "name": d.name,
+            "position": [round(pos.x, 4), round(pos.y, 4), round(pos.z, 4)],
+            "tilt_degrees": round(math.degrees(tilt_rad), 2),
+            "fallen": tilt_rad > math.radians(30.0),
+        })
+    return data
+
+
+def _detect_failure_modes(
+    dominos: list[bpy.types.Object],
+    per_domino: list[dict[str, Any]],
+    completion_ratio: float,
+) -> list[dict[str, str]]:
+    """Detect calibration-relevant failure modes from simulation state.
+
+    Returns a list of {mode, detail} dicts. Modes match the FailureMode
+    enum in kairos.calibration.models.
+    """
+    failures: list[dict[str, str]] = []
+    dg = bpy.context.evaluated_depsgraph_get()
+
+    # Chain break detection: find gaps in the topple sequence
+    fallen_flags = [d["fallen"] for d in per_domino]
+    if fallen_flags:
+        # Find first non-fallen after a fallen sequence
+        saw_fallen = False
+        for i, f in enumerate(fallen_flags):
+            if f:
+                saw_fallen = True
+            elif saw_fallen:
+                failures.append({
+                    "mode": "chain_break",
+                    "detail": f"Chain break at domino {i} ({per_domino[i]['name']})",
+                })
+                break
+
+    # Incomplete propagation
+    if 0.0 < completion_ratio < 0.90:
+        failures.append({
+            "mode": "incomplete_propagation",
+            "detail": f"Only {completion_ratio:.0%} of dominoes fell",
+        })
+
+    # Trigger miss: first domino didn't fall
+    if fallen_flags and not fallen_flags[0]:
+        failures.append({
+            "mode": "trigger_miss",
+            "detail": "First domino did not fall — trigger may have missed",
+        })
+
+    # Physics anomalies: floating or explosion
+    for d_data in per_domino:
+        z = d_data["position"][2]
+        if z > 20:
+            failures.append({
+                "mode": "explosion",
+                "detail": f"{d_data['name']} at z={z} — likely explosion",
+            })
+            break
+        if z < -5:
+            failures.append({
+                "mode": "floating",
+                "detail": f"{d_data['name']} at z={z} — fell through ground",
+            })
+            break
+
+    return failures
+
+
+def run_smoke_test(frame_count: int = 0, calibration_mode: bool = False) -> dict[str, Any]:
     """Run a partial physics bake and check domino toppling.
 
     If *frame_count* is 0 (default), it is auto-computed from the
@@ -111,9 +195,10 @@ def run_smoke_test(frame_count: int = 0) -> dict[str, Any]:
         frame_count = max(300, int(total * 9) + 60)  # ~9 frames/domino + 60 for trigger
         frame_count = min(frame_count, scene.frame_end)
     print(f"Smoke test: {total} dominos, baking {frame_count} frames")
-    # Record initial positions
+    # Record initial positions (XY for explosion detection, Z for reference)
     scene.frame_set(1)
-    initial_z = {d.name: d.location.z for d in dominos}
+    initial_pos = {d.name: (d.location.x, d.location.y, d.location.z) for d in dominos}
+    initial_z = {k: v[2] for k, v in initial_pos.items()}  # legacy ref
 
     # Bake partial
     print(f"Baking {frame_count} frames for smoke test...")
@@ -144,32 +229,62 @@ def run_smoke_test(frame_count: int = 0) -> dict[str, Any]:
                    + ("" if chain_ok else " (need >=90%)"),
     })
 
-    # Check 3: Dominos stayed on ground (didn't fly away)
+    # Check 3: Physics stability — no dominos flew off or launched laterally.
+    # An explosion can scatter dominoes in XY without going high in Z, so we
+    # check both vertical flyaway (z out of bounds) AND lateral launch
+    # (XY displacement > 4× domino height from starting position).
     flew_away = 0
+    launched = 0
     dg = bpy.context.evaluated_depsgraph_get()
     for d in dominos:
         d_eval = d.evaluated_get(dg)
-        world_z = d_eval.matrix_world.translation.z
-        if world_z > 20 or world_z < -5:
+        pos = d_eval.matrix_world.translation
+        # Vertical flyaway
+        if pos.z > 20 or pos.z < -5:
             flew_away += 1
-    stability_ok = flew_away <= total * 0.05
+            continue
+        # Lateral explosion: displacement > 4× domino height from start
+        # A legitimately toppled domino moves at most ~h/2 in XY.
+        ix, iy, _ = initial_pos[d.name]
+        xy_disp = math.sqrt((pos.x - ix) ** 2 + (pos.y - iy) ** 2)
+        domino_h = max(d.dimensions) if max(d.dimensions) > 0 else 4.0
+        if xy_disp > domino_h * 4.0:
+            launched += 1
+    anomaly_count = flew_away + launched
+    stability_ok = anomaly_count <= max(1, int(total * 0.05))
     checks.append({
         "name": "physics_stability",
         "passed": stability_ok,
-        "message": f"{flew_away} dominos flew off" if not stability_ok
-                   else "Physics stable — no flyaways",
+        "message": (
+            f"{flew_away} flew off vertically, {launched} launched laterally — likely explosion"
+            if not stability_ok
+            else f"Physics stable — no flyaways or lateral launches"
+        ),
     })
 
     all_passed = all(c["passed"] for c in checks)
 
-    return {
+    result: dict[str, Any] = {
         "passed": all_passed,
         "reason": "All smoke checks passed" if all_passed else "Some checks failed",
         "checks": checks,
         "fallen_count": fallen,
         "total_count": total,
         "completion_ratio": round(ratio, 3),
+        "physics_anomalies": anomaly_count,
     }
+
+    # Extended calibration diagnostics
+    if calibration_mode:
+        per_domino = _get_per_domino_data(dominos)
+        failure_modes = _detect_failure_modes(dominos, per_domino, ratio)
+        result["calibration"] = {
+            "per_domino": per_domino,
+            "failure_modes": failure_modes,
+            "physics_anomalies": anomaly_count,
+        }
+
+    return result
 
 
 def main() -> None:
@@ -180,11 +295,14 @@ def main() -> None:
         argv = []
 
     frame_count = 0  # 0 = auto-compute based on domino count
+    calibration_mode = False
     for i, arg in enumerate(argv):
         if arg == "--frames" and i + 1 < len(argv):
             frame_count = int(argv[i + 1])
+        if arg == "--calibration-mode":
+            calibration_mode = True
 
-    result = run_smoke_test(frame_count)
+    result = run_smoke_test(frame_count, calibration_mode=calibration_mode)
     print(json.dumps(result, indent=2))
 
     if not result["passed"]:

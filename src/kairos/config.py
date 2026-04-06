@@ -129,6 +129,18 @@ class Settings(BaseSettings):
     # --- Environment / Theming ---
     freesound_api_key: str = ""  # Optional: enables collision SFX
 
+    # --- Calibration ---
+    calibration_enabled: bool = Field(
+        default=False,
+        description="Enable calibration knowledge-base lookups at idea-generation time.",
+    )
+    chromadb_host: str = "localhost"
+    chromadb_port: int = 8000
+    calibration_output_dir: Path | None = Field(
+        default=None,
+        description="Override for calibration session output (default: output/calibration/).",
+    )
+
     # --- Cost Alerts ---
     cost_alert_threshold_usd: float = 0.30  # 7-day rolling average
 
@@ -170,6 +182,8 @@ class Settings(BaseSettings):
             self.music_dir = self.project_root / "assets" / "music"
         if self.output_dir is None:
             self.output_dir = self.project_root / "output"
+        if self.calibration_output_dir is None:
+            self.calibration_output_dir = self.project_root / "output" / "calibration"
 
         # Resolve FFmpeg paths once at startup
         if not self.ffmpeg_path:

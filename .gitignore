@@ -108,9 +108,12 @@ test_gray.raw
 audio_diagnosis/
 
 # ─── Large binary assets ──────────────────────────────────────────────────────
-# HDRIs (.exr) and textures can be hundreds of MB — use Git LFS or store externally.
+# 3D models, HDRIs, and textures downloaded via polydown (see docs/assets.md).
+# Total ~1-2GB — not source-controlled.
+assets/models/
 assets/hdris/
 assets/textures/
+src/assets/textures/
 *.exr
 
 # SFX / audio samples

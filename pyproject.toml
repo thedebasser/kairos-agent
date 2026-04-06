@@ -42,6 +42,9 @@ dependencies = [
     # Observability
     "langfuse>=2.56.0,<3.0",
 
+    # Vector store (calibration knowledge base)
+    "chromadb>=1.0.0",
+
     # Utilities
     "httpx>=0.28.0,<1.0",
     "python-dotenv>=1.0.1,<2.0",
