@@ -1,10 +1,17 @@
 """Kairos Agent -- Langfuse Tracing Sink & In-Memory Metrics.
 
 Provides:
-- ``LangfuseSink`` -- ``TracingSink`` implementation that forwards events
-  to Langfuse for LLM-centric observability.
+- ``LangfuseSink`` -- ``TracingSink`` implementation that forwards **all**
+  pipeline events to Langfuse with proper hierarchy:
+
+    Trace (1 per pipeline run)
+    +-- Span  (1 per pipeline step / graph node)
+    |   +-- Generation (1 per LLM call)
+    |   +-- Span       (decisions, console messages)
+    +-- ...
+
 - Legacy ``trace_llm_call`` / ``trace_pipeline_step`` functions retained
-  for backward compatibility while the migration to ``RunTracer`` completes.
+  for backward compatibility (called directly from ``routing.py``).
 - In-memory ``MetricsStore`` + ``AlertManager`` for cost tracking.
 """
 
@@ -24,65 +31,8 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
-# TracingSink Implementation
+# Langfuse Client Singleton
 # =============================================================================
-
-class LangfuseSink:
-    """TracingSink that forwards events to Langfuse.
-
-    Implements the ``TracingSink`` protocol (on_event / flush / close)
-    so it can be registered with ``RunTracer``.  Also feeds the in-memory
-    ``MetricsStore`` for dashboard queries.
-    """
-
-    def on_event(self, event: Any) -> None:
-        """Dispatch an event to Langfuse and the metrics store."""
-        from kairos.ai.tracing.events import (
-            LLMCallCompleted,
-            StepCompleted,
-        )
-
-        try:
-            if isinstance(event, LLMCallCompleted):
-                trace_llm_call(
-                    trace_name=f"{event.step_name}:{event.model_alias}",
-                    model=event.model_resolved,
-                    input_messages=[],
-                    output=None,
-                    tokens_in=event.tokens_in,
-                    tokens_out=event.tokens_out,
-                    cost_usd=event.cost_usd,
-                    latency_ms=event.latency_ms,
-                    status=event.status,
-                    error=event.error,
-                    pipeline_run_id=event.run_id,
-                )
-            elif isinstance(event, StepCompleted):
-                trace_pipeline_step(
-                    pipeline_run_id=event.run_id,
-                    step_name=event.step_name,
-                    status=event.status,
-                    duration_ms=event.duration_ms,
-                )
-        except Exception as exc:
-            logger.warning("LangfuseSink.on_event failed: %s", exc)
-
-    def flush(self) -> None:
-        client = get_langfuse_client()
-        if client is not None:
-            try:
-                client.flush()
-            except Exception as exc:
-                logger.warning("LangfuseSink.flush failed: %s", exc)
-
-    def close(self) -> None:
-        self.flush()
-
-
-# =============================================================================
-# Langfuse Integration
-# =============================================================================
-
 
 _langfuse_client = None
 
@@ -111,10 +61,367 @@ def get_langfuse_client():
     return _langfuse_client
 
 
+# =============================================================================
+# Hierarchical TracingSink Implementation
+# =============================================================================
+
+class LangfuseSink:
+    """TracingSink that forwards events to Langfuse with proper hierarchy.
+
+    Creates one **trace** per pipeline run, with **spans** for each step
+    and **generations** for each LLM call nested inside the step span.
+
+    Handles all 9 event types:
+    - RunStarted      -> creates the root Langfuse trace
+    - RunCompleted    -> updates the trace with final status/cost
+    - StepStarted     -> creates a span under the run trace
+    - StepCompleted   -> ends the step span with status/duration
+    - LLMCallStarted  -> (logged, generation created on completion)
+    - LLMCallCompleted -> creates a generation under the step span
+    - PromptRendered   -> attaches prompt metadata to the step span
+    - Decision         -> creates a sub-span for agent reasoning
+    - ConsoleMessage   -> creates an event on the step or run span
+
+    Also feeds the in-memory ``MetricsStore`` for dashboard queries.
+    """
+
+    def __init__(self) -> None:
+        # Langfuse object refs keyed by run_id / step_name
+        self._run_traces: dict[str, Any] = {}       # run_id -> langfuse trace
+        self._step_spans: dict[str, Any] = {}        # f"{run_id}:{step_name}" -> langfuse span
+        self._run_metadata: dict[str, dict[str, Any]] = {}  # accumulated data per run
+        self._current_step_name: str | None = None   # active step for generation nesting
+
+    # -- TracingSink protocol ------------------------------------------------
+
+    def on_event(self, event: Any) -> None:
+        """Dispatch an event to Langfuse and the metrics store."""
+        from kairos.ai.tracing.events import (
+            ActionTaken,
+            ConsoleMessage,
+            Decision,
+            LLMCallCompleted,
+            LLMCallStarted,
+            PromptRendered,
+            RunCompleted,
+            RunStarted,
+            StepCompleted,
+            StepStarted,
+        )
+
+        try:
+            if isinstance(event, RunStarted):
+                self._on_run_started(event)
+            elif isinstance(event, RunCompleted):
+                self._on_run_completed(event)
+            elif isinstance(event, StepStarted):
+                self._on_step_started(event)
+            elif isinstance(event, StepCompleted):
+                self._on_step_completed(event)
+            elif isinstance(event, LLMCallStarted):
+                pass  # Generation is created on completion with full data
+            elif isinstance(event, LLMCallCompleted):
+                self._on_llm_call_completed(event)
+            elif isinstance(event, PromptRendered):
+                self._on_prompt_rendered(event)
+            elif isinstance(event, Decision):
+                self._on_decision(event)
+            elif isinstance(event, ConsoleMessage):
+                self._on_console(event)
+            elif isinstance(event, ActionTaken):
+                self._on_action_taken(event)
+
+            # Always feed local metrics store
+            self._record_local_metrics(event)
+
+        except Exception as exc:
+            logger.warning("LangfuseSink.on_event(%s) failed: %s", getattr(event, "event_type", "?"), exc)
+
+    def flush(self) -> None:
+        client = get_langfuse_client()
+        if client is not None:
+            try:
+                client.flush()
+            except Exception as exc:
+                logger.warning("LangfuseSink.flush failed: %s", exc)
+
+    def close(self) -> None:
+        self.flush()
+        # Clean up references
+        self._run_traces.clear()
+        self._step_spans.clear()
+        self._run_metadata.clear()
+
+    # -- Event handlers (private) -------------------------------------------
+
+    def _on_run_started(self, event: Any) -> None:
+        """Create the root Langfuse trace for this pipeline run."""
+        client = get_langfuse_client()
+        if client is None:
+            return
+
+        trace = client.trace(
+            id=event.run_id,
+            name=f"pipeline:{event.pipeline}",
+            session_id=event.pipeline_run_id,
+            metadata={
+                "pipeline": event.pipeline,
+                "pipeline_run_id": event.pipeline_run_id,
+            },
+            tags=["kairos", f"pipeline:{event.pipeline}"],
+        )
+        self._run_traces[event.run_id] = trace
+        self._run_metadata[event.run_id] = {
+            "pipeline": event.pipeline,
+            "total_cost": 0.0,
+            "total_llm_calls": 0,
+        }
+        logger.debug("Langfuse trace created: run=%s pipeline=%s", event.run_id, event.pipeline)
+
+    def _on_run_completed(self, event: Any) -> None:
+        """Update the root trace with final run status and metrics."""
+        client = get_langfuse_client()
+        if client is None:
+            return
+
+        trace = self._run_traces.get(event.run_id)
+        if trace is None:
+            # Trace wasn't created (possibly Langfuse was disabled at start)
+            return
+
+        # Update the trace with final status
+        trace.update(
+            metadata={
+                "pipeline": event.pipeline,
+                "pipeline_run_id": event.pipeline_run_id,
+                "status": event.status,
+                "total_duration_ms": event.total_duration_ms,
+                "total_cost_usd": event.total_cost_usd,
+                "total_llm_calls": event.total_llm_calls,
+                "errors": event.errors,
+                "final_video_path": event.final_video_path,
+                "concept_title": event.concept_title,
+            },
+            tags=["kairos", f"pipeline:{event.pipeline}", f"status:{event.status}"],
+        )
+        logger.debug(
+            "Langfuse trace completed: run=%s status=%s cost=$%.4f calls=%d",
+            event.run_id, event.status, event.total_cost_usd, event.total_llm_calls,
+        )
+
+    def _on_step_started(self, event: Any) -> None:
+        """Create a span under the run trace for this step."""
+        client = get_langfuse_client()
+        if client is None:
+            return
+
+        trace = self._run_traces.get(event.run_id)
+        if trace is None:
+            return
+
+        span = trace.span(
+            name=event.step_name,
+            metadata={
+                "step_number": event.step_number,
+                "attempt": event.attempt,
+            },
+        )
+        key = f"{event.run_id}:{event.step_name}"
+        self._step_spans[key] = span
+        self._current_step_name = event.step_name
+        logger.debug("Langfuse span created: step=%s (span key=%s)", event.step_name, key)
+
+    def _on_step_completed(self, event: Any) -> None:
+        """End the step span with status and duration."""
+        key = f"{event.run_id}:{event.step_name}"
+        span = self._step_spans.get(key)
+        if span is None:
+            # Also feed metrics even without Langfuse
+            return
+
+        span.end(
+            metadata={
+                "status": event.status,
+                "duration_ms": event.duration_ms,
+                "errors": event.errors,
+            },
+            level="ERROR" if event.status == "error" else "DEFAULT",
+            status_message=f"{event.step_name}: {event.status} ({event.duration_ms}ms)",
+        )
+        # Clean up
+        self._step_spans.pop(key, None)
+        self._current_step_name = None
+        logger.debug("Langfuse span ended: step=%s status=%s", event.step_name, event.status)
+
+    def _on_llm_call_completed(self, event: Any) -> None:
+        """Create a Langfuse generation under the step span."""
+        # Always record metrics locally
+        record_metric(
+            "llm_call",
+            cost_usd=event.cost_usd,
+            model=event.model_resolved,
+            latency_ms=event.latency_ms,
+            status=event.status,
+        )
+
+        # Accumulate run totals
+        meta = self._run_metadata.get(event.run_id)
+        if meta:
+            meta["total_cost"] += event.cost_usd
+            meta["total_llm_calls"] += 1
+
+        client = get_langfuse_client()
+        if client is None:
+            return
+
+        # Try to nest under step span; fall back to run trace
+        key = f"{event.run_id}:{event.step_name}"
+        parent = self._step_spans.get(key) or self._run_traces.get(event.run_id)
+        if parent is None:
+            return
+
+        gen_metadata: dict[str, Any] = {
+            "call_id": event.call_id,
+            "model_alias": event.model_alias,
+            "model_type": event.model_type,
+            "provider": event.provider,
+            "call_pattern": event.call_pattern,
+            "routing_outcome": event.routing_outcome,
+            "has_thinking": event.has_thinking,
+            "status": event.status,
+        }
+        if event.error:
+            gen_metadata["error"] = event.error
+
+        parent.generation(
+            name=f"{event.step_name}:{event.model_alias}",
+            model=event.model_resolved,
+            usage={
+                "input": event.tokens_in,
+                "output": event.tokens_out,
+                "total": event.tokens_in + event.tokens_out,
+            },
+            metadata=gen_metadata,
+            level="ERROR" if event.status == "error" else "DEFAULT",
+            status_message=event.error if event.error else None,
+        )
+
+        logger.debug(
+            "Langfuse generation: %s:%s model=%s tokens=%d/%d cost=$%.4f",
+            event.step_name, event.model_alias, event.model_resolved,
+            event.tokens_in, event.tokens_out, event.cost_usd,
+        )
+
+    def _on_prompt_rendered(self, event: Any) -> None:
+        """Attach prompt template metadata to the step span."""
+        key = f"{event.run_id}:{event.step_name}"
+        span = self._step_spans.get(key)
+        if span is None:
+            return
+
+        span.event(
+            name=f"prompt:{event.template_name}",
+            metadata={
+                "template_name": event.template_name,
+                "template_version": event.template_version,
+                "template_hash": event.template_hash,
+                "variables": event.variables,
+            },
+        )
+
+    def _on_decision(self, event: Any) -> None:
+        """Record an agent decision as an event on the step span."""
+        key = f"{event.run_id}:{event.step_name}"
+        span = self._step_spans.get(key)
+        if span is None:
+            return
+
+        span.event(
+            name=f"decision:{event.step_name}",
+            metadata={
+                "saw": event.saw,
+                "decided": event.decided,
+                "action": event.action,
+                "reasoning": event.reasoning[:2000] if event.reasoning else "",
+            },
+        )
+
+    def _on_console(self, event: Any) -> None:
+        """Record a console message as an event on the step or run."""
+        key = f"{event.run_id}:{event.step_name}" if event.step_name else None
+        parent = (self._step_spans.get(key) if key else None) or self._run_traces.get(event.run_id)
+        if parent is None:
+            return
+
+        level_map = {
+            "error": "ERROR",
+            "warning": "WARNING",
+            "debug": "DEBUG",
+        }
+        parent.event(
+            name=f"console:{event.level}",
+            metadata={"message": event.message, "step_name": event.step_name},
+            level=level_map.get(event.level, "DEFAULT"),
+        )
+
+    def _on_action_taken(self, event: Any) -> None:
+        """Record a tool/sub-operation invocation as an event on the step span."""
+        key = f"{event.run_id}:{event.step_name}" if event.step_name else None
+        parent = (self._step_spans.get(key) if key else None) or self._run_traces.get(event.run_id)
+        if parent is None:
+            return
+
+        level = "ERROR" if event.status == "error" else "DEFAULT"
+        status_prefix = "[OK]" if event.status == "success" else f"[{event.status.upper()}]"
+        name = f"tool:{event.tool}"
+
+        parent.event(
+            name=name,
+            metadata={
+                "tool": event.tool,
+                "input": event.input_summary,
+                "output": event.output_summary,
+                "status": event.status,
+                "duration_ms": event.duration_ms,
+                "label": f"{status_prefix} {event.tool} — {event.output_summary}"[:200],
+            },
+            level=level,
+        )
+        logger.debug(
+            "Langfuse action: %s step=%s status=%s dur=%dms",
+            event.tool, event.step_name, event.status, event.duration_ms,
+        )
+
+    # -- Local metrics helper -----------------------------------------------
+
+    def _record_local_metrics(self, event: Any) -> None:
+        """Feed the in-memory MetricsStore from relevant events."""
+        from kairos.ai.tracing.events import LLMCallCompleted, StepCompleted
+
+        if isinstance(event, StepCompleted):
+            record_metric(
+                "pipeline_step",
+                step=event.step_name,
+                status=event.status,
+                duration_ms=event.duration_ms,
+            )
+
+
+# =============================================================================
+# Legacy Functions (called directly from routing.py)
+# =============================================================================
+# These are called from call_llm / call_llm_code / call_with_quality_fallback
+# in routing.py. They create independent generations that are also attached
+# to the run trace if one exists. This gives us Langfuse coverage even for
+# LLM calls that happen outside the RunTracer step context managers.
+# =============================================================================
+
+
 def trace_llm_call(
     *,
     trace_name: str,
     model: str,
+    model_resolved: str | None = None,
     input_messages: list[dict[str, str]],
     output: Any,
     tokens_in: int = 0,
@@ -129,9 +436,15 @@ def trace_llm_call(
 ) -> None:
     """Log an LLM call to Langfuse for tracing.
 
-    If Langfuse is not configured, logs locally only.
+    If Langfuse is not configured, records to local metrics only.
+
+    This function is called directly from ``routing.py`` for every LLM
+    call (``call_llm``, ``call_llm_code``, ``call_with_quality_fallback``).
+    It creates a generation on the **active run trace** if one exists,
+    or creates an independent trace if called outside a pipeline run.
+
     ``thinking`` is the extended-thinking / chain-of-thought content
-    returned by Anthropic models — logged both locally and in Langfuse.
+    returned by Anthropic/Qwen models.
     """
     client = get_langfuse_client()
 
@@ -154,39 +467,72 @@ def trace_llm_call(
         return
 
     try:
-        trace_metadata: dict[str, Any] = {
-            "pipeline_run_id": pipeline_run_id,
-            **(metadata or {}),
-        }
-        if thinking:
-            trace_metadata["thinking_chars"] = len(thinking)
+        # Build output representation
+        output_str: str | None = None
+        if output is not None:
+            if hasattr(output, "model_dump_json"):
+                output_str = output.model_dump_json(indent=2)[:5000]
+            else:
+                output_str = str(output)[:5000]
 
-        trace = client.trace(
-            name=trace_name,
-            metadata=trace_metadata,
-        )
+        # Use the resolved model for Langfuse so price lookup works;
+        # keep the alias in metadata for human reference.
+        langfuse_model = model_resolved or model
+
         gen_metadata: dict[str, Any] = {
             "cost_usd": cost_usd,
             "latency_ms": latency_ms,
             "status": status,
             "error": error,
+            "model_alias": model,
+            **(metadata or {}),
         }
         if thinking:
             # Store thinking content in Langfuse metadata (truncated to 10k
             # to stay within Langfuse field limits)
             gen_metadata["thinking"] = thinking[:10_000]
+            gen_metadata["thinking_chars"] = len(thinking)
 
-        trace.generation(
+        # Try to find the active run trace from the LangfuseSink singleton
+        # so this generation nests under the pipeline run.
+        from kairos.ai.tracing.tracer import get_tracer
+
+        parent: Any = None
+        tracer = get_tracer()
+        if tracer and tracer._run_id:
+            # Prefer the active step span so generations nest properly;
+            # fall back to the run trace if no step is active.
+            for sink in tracer._sinks:
+                if isinstance(sink, LangfuseSink):
+                    if sink._current_step_name:
+                        key = f"{tracer._run_id}:{sink._current_step_name}"
+                        parent = sink._step_spans.get(key) or sink._run_traces.get(tracer._run_id)
+                    else:
+                        parent = sink._run_traces.get(tracer._run_id)
+                    break
+
+        if parent is None:
+            # No active run — create an independent trace
+            trace_meta: dict[str, Any] = {"pipeline_run_id": pipeline_run_id}
+            parent = client.trace(
+                name=trace_name,
+                metadata=trace_meta,
+                tags=["kairos", "standalone_llm_call"],
+            )
+
+        parent.generation(
             name=f"{trace_name}_generation",
-            model=model,
+            model=langfuse_model,
             input=input_messages,
-            output=str(output)[:2000] if output else None,
+            output=output_str,
             usage={
                 "input": tokens_in,
                 "output": tokens_out,
                 "total": tokens_in + tokens_out,
             },
             metadata=gen_metadata,
+            level="ERROR" if status == "error" else "DEFAULT",
+            status_message=error if error else None,
         )
 
         logger.debug("Langfuse generation logged: %s", trace_name)
@@ -203,7 +549,12 @@ def trace_pipeline_step(
     duration_ms: int = 0,
     metadata: dict[str, Any] | None = None,
 ) -> None:
-    """Log a pipeline step to Langfuse as a span."""
+    """Log a pipeline step to Langfuse as a span (legacy).
+
+    Prefer using ``RunTracer.step()`` context manager which emits
+    ``StepStarted``/``StepCompleted`` events through the ``LangfuseSink``.
+    Retained for backward compatibility.
+    """
     client = get_langfuse_client()
 
     record_metric(

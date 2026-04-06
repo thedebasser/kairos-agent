@@ -54,8 +54,14 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
     return _session_factory_instance
 
 
-# Alias used by llm_routing.py and cli.py (Finding 4.4)
-async_session_factory = get_session_factory
+def async_session_factory() -> AsyncSession:
+    """Create a new AsyncSession from the singleton factory.
+
+    Shorthand for ``get_session_factory()()`` — the factory returns an
+    ``async_sessionmaker``, which must itself be *called* to produce a
+    session.  Callers use: ``async with async_session_factory() as session:``
+    """
+    return get_session_factory()()
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:

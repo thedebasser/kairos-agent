@@ -490,6 +490,36 @@ class OllamaDefaultCapabilities(ModelCapabilities):
         return TokenPricing(0.0, 0.0)  # Local model — free
 
 
+class GLMCapabilities(OllamaDefaultCapabilities):
+    """Capabilities for ZhipuAI GLM models running via Ollama (e.g. glm-4.7-flash).
+
+    GLM models return multiple tool_calls when used in TOOLS mode, which
+    Instructor cannot handle. JSON mode bypasses tool calling entirely and
+    asks the model to emit raw JSON that Instructor then validates.
+
+    GLM-4.7-flash is a thinking model — when thinking is enabled it puts
+    all tokens into the reasoning field and returns empty content.  We
+    disable thinking (think=False) for structured output calls so that
+    the answer appears in the content field where Instructor can parse it.
+    """
+
+    @property
+    def family_name(self) -> str:
+        return "glm"
+
+    @property
+    def supports_thinking(self) -> bool:
+        return True  # GLM-4.7-flash is a thinking model
+
+    def get_instructor_mode(self, thinking_enabled: bool = False) -> instructor.Mode | None:
+        return instructor.Mode.JSON
+
+    def get_extra_call_params(self, structured_output: bool = False) -> dict[str, Any]:
+        if structured_output:
+            return {"think": False}
+        return {}
+
+
 # =============================================================================
 # Registry & Factory
 # =============================================================================
@@ -512,6 +542,9 @@ _CAPABILITY_REGISTRY: list[tuple[re.Pattern[str], ModelCapabilities]] = [
 
     # OpenAI GPT
     (re.compile(r"^(openai/|gpt[-_])", re.IGNORECASE), OpenAICapabilities()),
+
+    # GLM (ZhipuAI models via Ollama) — must come before Ollama catch-all
+    (re.compile(r"glm", re.IGNORECASE), GLMCapabilities()),
 
     # Ollama catch-all (Mistral, Llama, Moondream, etc.)
     (re.compile(r"^ollama/", re.IGNORECASE), OllamaDefaultCapabilities()),

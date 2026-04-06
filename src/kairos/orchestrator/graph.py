@@ -153,7 +153,6 @@ async def idea_node(state: dict[str, Any]) -> dict[str, Any]:
             logger.info("[idea_node] Returning cached result (no LLM call)")
             return cached
 
-    step_start = time.monotonic()
     attempt = state.get("concept_attempts", 0) + 1
     logger.info("[idea_node] Generating concept (attempt %d/%d)", attempt, MAX_CONCEPT_ATTEMPTS)
 
@@ -164,43 +163,38 @@ async def idea_node(state: dict[str, Any]) -> dict[str, Any]:
     # Narrow DTO: only pass what the agent actually needs (Finding 2.2)
     idea_input = IdeaAgentInput(pipeline=pipeline_name)
 
-    try:
-        concept = await agent.generate_concept(idea_input)
-    except PipelineError as exc:
-        logger.error("[idea_node] Concept generation failed: %s", exc)
-        # Emit failure trace
-        tracer = get_tracer()
-        duration_ms = int((time.monotonic() - step_start) * 1000)
-        tracer.console(f"idea_agent failed ({duration_ms}ms): {exc}", level="error", step_name="idea_agent")
-        collect_llm_calls()  # drain buffer
-        return {
-            "status": "error",
-            "concept": None,
+    tracer = get_tracer()
+    with tracer.step("idea_agent", 1, attempt=attempt) as span:
+        try:
+            concept = await agent.generate_concept(idea_input)
+        except PipelineError as exc:
+            logger.error("[idea_node] Concept generation failed: %s", exc)
+            span.fail(str(exc))
+            collect_llm_calls()
+            return {
+                "status": "error",
+                "concept": None,
+                "concept_attempts": attempt,
+                "errors": [*state.get("errors", []), f"idea_node: {exc}"],
+            }
+
+        logger.info("[idea_node] OK Concept generated: %s (category=%s)", concept.title, concept.category.value)
+        collect_thinking()
+        collect_llm_calls()
+        span.set_outputs({"concept_title": concept.title, "category": concept.category.value})
+
+        result = {
+            "status": PipelineStatus.SIMULATION_PHASE.value,
+            "concept": concept.model_dump(mode="json"),
             "concept_attempts": attempt,
-            "errors": [*state.get("errors", []), f"idea_node: {exc}"],
+            "errors": [],
         }
 
-    logger.info("[idea_node] OK Concept generated: %s (category=%s)", concept.title, concept.category.value)
+        # ── Step cache store ────────────────────────────────────────────────
+        if cache:
+            cache.put_step("idea_node", result, idea_hash)
 
-    # Emit success trace
-    tracer = get_tracer()
-    duration_ms = int((time.monotonic() - step_start) * 1000)
-    collect_thinking()  # drain thinking buffer
-    collect_llm_calls()  # drain call buffer
-    tracer.console(f"idea_agent completed in {duration_ms}ms", step_name="idea_agent")
-
-    result = {
-        "status": PipelineStatus.SIMULATION_PHASE.value,
-        "concept": concept.model_dump(mode="json"),
-        "concept_attempts": attempt,
-        "errors": [],
-    }
-
-    # ── Step cache store ────────────────────────────────────────────────
-    if cache:
-        cache.put_step("idea_node", result, idea_hash)
-
-    return result
+        return result
 
 
 async def simulation_node(state: dict[str, Any]) -> dict[str, Any]:
@@ -219,7 +213,6 @@ async def simulation_node(state: dict[str, Any]) -> dict[str, Any]:
             logger.info("[simulation_node] Returning cached result (no LLM/sandbox calls)")
             return cached
 
-    step_start = time.monotonic()
     logger.info("[simulation_node] Starting simulation loop")
 
     pipeline_name = state.get("pipeline", "physics")
@@ -230,149 +223,151 @@ async def simulation_node(state: dict[str, Any]) -> dict[str, Any]:
     pipeline_state = _dict_to_pipeline_state(state)
     concept = pipeline_state.concept
 
-    try:
-        loop_result = await agent.run_loop(concept)  # type: ignore[arg-type]
-    except Exception as exc:
-        logger.error("[simulation_node] Simulation agent failed: %s", exc)
-        # Emit failure trace
-        tracer = get_tracer()
-        duration_ms = int((time.monotonic() - step_start) * 1000)
-        tracer.console(f"simulation_agent failed ({duration_ms}ms): {exc}", level="error", step_name="simulation_agent")
-        collect_llm_calls()  # drain buffer
-        return {
-            "status": PipelineStatus.SIMULATION_PHASE.value,
-            "simulation_iteration": pipeline_state.simulation_iteration,
-            "errors": [*state.get("errors", []), f"simulation_node: {exc}"],
-        }
+    tracer = get_tracer()
+    with tracer.step("simulation_agent", 2) as span:
+        try:
+            loop_result = await agent.run_loop(concept)  # type: ignore[arg-type]
+        except Exception as exc:
+            logger.error("[simulation_node] Simulation agent failed: %s", exc)
+            span.fail(str(exc))
+            collect_llm_calls()
+            return {
+                "status": PipelineStatus.SIMULATION_PHASE.value,
+                "simulation_iteration": pipeline_state.simulation_iteration,
+                "errors": [*state.get("errors", []), f"simulation_node: {exc}"],
+            }
 
-    # Map SimulationLoopResult → state update dict (Finding 2.2)
-    # If run_loop completed but validation never passed, warn but proceed if video exists
-    if loop_result.validation_result and not loop_result.validation_result.passed:
-        msg = (
-            f"Simulation validation incomplete after {loop_result.simulation_iteration} iterations: "
-            f"{loop_result.validation_result.summary}"
-        )
-        if loop_result.raw_video_path:
-            logger.warning("[simulation_node] %s — proceeding with rendered video", msg)
-        else:
+        # Map SimulationLoopResult → state update dict (Finding 2.2)
+        # If run_loop completed but validation never passed, warn but proceed if video exists
+        if loop_result.validation_result and not loop_result.validation_result.passed:
+            msg = (
+                f"Simulation validation incomplete after {loop_result.simulation_iteration} iterations: "
+                f"{loop_result.validation_result.summary}"
+            )
+            if loop_result.raw_video_path:
+                logger.warning("[simulation_node] %s — proceeding with rendered video", msg)
+            else:
+                logger.error("[simulation_node] %s", msg)
+                span.fail(msg)
+                return {
+                    "status": "error",
+                    "simulation_iteration": loop_result.simulation_iteration,
+                    "errors": [*state.get("errors", []), f"simulation_node: {msg}"],
+                }
+
+        if not loop_result.raw_video_path:
+            msg = f"No video produced after {loop_result.simulation_iteration} iterations"
             logger.error("[simulation_node] %s", msg)
+            span.fail(msg)
             return {
                 "status": "error",
                 "simulation_iteration": loop_result.simulation_iteration,
                 "errors": [*state.get("errors", []), f"simulation_node: {msg}"],
             }
 
-    if not loop_result.raw_video_path:
-        msg = f"No video produced after {loop_result.simulation_iteration} iterations"
-        logger.error("[simulation_node] %s", msg)
-        return {
-            "status": "error",
+        logger.info(
+            "[simulation_node] OK Simulation passed on iteration %d -- video: %s",
+            loop_result.simulation_iteration,
+            loop_result.raw_video_path,
+        )
+
+        thinking_entries = collect_thinking()
+        collect_llm_calls()
+        span.set_outputs({
             "simulation_iteration": loop_result.simulation_iteration,
-            "errors": [*state.get("errors", []), f"simulation_node: {msg}"],
+            "raw_video_path": loop_result.raw_video_path or "",
+        })
+
+        # Save the raw simulation code via file writer
+        writer = tracer._writer
+        if writer and loop_result.simulation_code:
+            writer.write_file("steps/02_simulation_agent/simulation_code.py", loop_result.simulation_code)
+
+        sim_result = {
+            "status": PipelineStatus.EDITING_PHASE.value,
+            "simulation_code": loop_result.simulation_code,
+            "simulation_result": (
+                loop_result.simulation_result.model_dump(mode="json")
+                if loop_result.simulation_result
+                else None
+            ),
+            "simulation_stats": (
+                loop_result.simulation_stats.model_dump(mode="json")
+                if loop_result.simulation_stats
+                else None
+            ),
+            "validation_result": (
+                loop_result.validation_result.model_dump(mode="json")
+                if loop_result.validation_result
+                else None
+            ),
+            "simulation_iteration": loop_result.simulation_iteration,
+            "raw_video_path": loop_result.raw_video_path,
+            "errors": [],
         }
 
-    logger.info(
-        "[simulation_node] OK Simulation passed on iteration %d -- video: %s",
-        loop_result.simulation_iteration,
-        loop_result.raw_video_path,
-    )
+        # Extract theme_name from theme_config.json if available
+        if loop_result.raw_video_path:
+            from pathlib import Path as _Path
+            _theme_cfg_path = _Path(loop_result.raw_video_path).parent / "theme_config.json"
+            if _theme_cfg_path.exists():
+                try:
+                    import json as _json
+                    sim_result["theme_name"] = _json.loads(
+                        _theme_cfg_path.read_text(encoding="utf-8")
+                    ).get("theme_name", "")
+                except Exception:
+                    pass
 
-    # Emit success trace
-    tracer = get_tracer()
-    duration_ms = int((time.monotonic() - step_start) * 1000)
-    thinking_entries = collect_thinking()  # drain thinking buffer
-    collect_llm_calls()  # drain call buffer
-    tracer.console(f"simulation_agent completed in {duration_ms}ms", step_name="simulation_agent")
-    # Save the raw simulation code via file writer
-    writer = tracer._writer
-    if writer and loop_result.simulation_code:
-        writer.write_file("steps/02_simulation_agent/simulation_code.py", loop_result.simulation_code)
+        # ── Step cache store ────────────────────────────────────────────────
+        if cache:
+            cache.put_step("simulation_node", sim_result, sim_hash)
 
-    sim_result = {
-        "status": PipelineStatus.EDITING_PHASE.value,
-        "simulation_code": loop_result.simulation_code,
-        "simulation_result": (
-            loop_result.simulation_result.model_dump(mode="json")
-            if loop_result.simulation_result
-            else None
-        ),
-        "simulation_stats": (
-            loop_result.simulation_stats.model_dump(mode="json")
-            if loop_result.simulation_stats
-            else None
-        ),
-        "validation_result": (
-            loop_result.validation_result.model_dump(mode="json")
-            if loop_result.validation_result
-            else None
-        ),
-        "simulation_iteration": loop_result.simulation_iteration,
-        "raw_video_path": loop_result.raw_video_path,
-        "errors": [],
-    }
-
-    # Extract theme_name from theme_config.json if available
-    if loop_result.raw_video_path:
-        from pathlib import Path as _Path
-        _theme_cfg_path = _Path(loop_result.raw_video_path).parent / "theme_config.json"
-        if _theme_cfg_path.exists():
-            try:
-                import json as _json
-                sim_result["theme_name"] = _json.loads(
-                    _theme_cfg_path.read_text(encoding="utf-8")
-                ).get("theme_name", "")
-            except Exception:
-                pass
-
-    # ── Step cache store ────────────────────────────────────────────────
-    if cache:
-        cache.put_step("simulation_node", sim_result, sim_hash)
-
-    # ── Learning loop: store training example + update category knowledge ──
-    try:
-        from kairos.ai.learning.learning_loop import (
-            record_training_example,
-            update_category_knowledge,
-        )
-        from kairos.schemas.contracts import ValidationResult as _VR
-
-        _concept_data = state.get("concept") or {}
-        _category = _concept_data.get("category", "") if isinstance(_concept_data, dict) else ""
-        _val_raw = loop_result.validation_result
-        _passed = _val_raw.passed if _val_raw else False
-
-        # Collect reasoning + thinking from the thinking buffer
-        _reasoning = ""
-        _thinking = ""
-        if thinking_entries:
-            _thinking = "\n---\n".join(
-                entry.get("thinking", "") for entry in thinking_entries if entry.get("thinking")
+        # ── Learning loop: store training example + update category knowledge ──
+        try:
+            from kairos.ai.learning.learning_loop import (
+                record_training_example,
+                update_category_knowledge,
             )
-            # First thinking entry is usually the generation reasoning
+            from kairos.schemas.contracts import ValidationResult as _VR
+
+            _concept_data = state.get("concept") or {}
+            _category = _concept_data.get("category", "") if isinstance(_concept_data, dict) else ""
+            _val_raw = loop_result.validation_result
+            _passed = _val_raw.passed if _val_raw else False
+
+            # Collect reasoning + thinking from the thinking buffer
+            _reasoning = ""
+            _thinking = ""
             if thinking_entries:
-                _reasoning = thinking_entries[0].get("thinking", "")[:2000]
+                _thinking = "\n---\n".join(
+                    entry.get("thinking", "") for entry in thinking_entries if entry.get("thinking")
+                )
+                # First thinking entry is usually the generation reasoning
+                if thinking_entries:
+                    _reasoning = thinking_entries[0].get("thinking", "")[:2000]
 
-        await record_training_example(
-            pipeline=pipeline_name,
-            category=_category,
-            concept_brief=_concept_data,
-            simulation_code=loop_result.simulation_code,
-            validation_passed=_passed,
-            iteration_count=loop_result.simulation_iteration,
-            reasoning=_reasoning,
-            thinking_content=_thinking,
-        )
+            await record_training_example(
+                pipeline=pipeline_name,
+                category=_category,
+                concept_brief=_concept_data,
+                simulation_code=loop_result.simulation_code,
+                validation_passed=_passed,
+                iteration_count=loop_result.simulation_iteration,
+                reasoning=_reasoning,
+                thinking_content=_thinking,
+            )
 
-        await update_category_knowledge(
-            pipeline=pipeline_name,
-            category=_category,
-            iteration_count=loop_result.simulation_iteration,
-            validation_result=_val_raw,
-        )
-    except Exception as _ll_exc:
-        logger.debug("Learning loop post-simulation hook skipped: %s", _ll_exc)
+            await update_category_knowledge(
+                pipeline=pipeline_name,
+                category=_category,
+                iteration_count=loop_result.simulation_iteration,
+                validation_result=_val_raw,
+            )
+        except Exception as _ll_exc:
+            logger.debug("Learning loop post-simulation hook skipped: %s", _ll_exc)
 
-    return sim_result
+        return sim_result
 
 
 async def video_editor_node(state: dict[str, Any]) -> dict[str, Any]:
@@ -391,7 +386,6 @@ async def video_editor_node(state: dict[str, Any]) -> dict[str, Any]:
             logger.info("[video_editor_node] Returning cached result (no LLM/FFmpeg calls)")
             return cached
 
-    step_start = time.monotonic()
     logger.info("[video_editor_node] Assembling video")
 
     pipeline_name = state.get("pipeline", "physics")
@@ -414,76 +408,101 @@ async def video_editor_node(state: dict[str, Any]) -> dict[str, Any]:
             "errors": [*state.get("errors", []), "video_editor_node: No concept available"],
         }
 
-    try:
-        # Select music
-        from kairos.schemas.contracts import SimulationStats
+    with tracer.step("video_editor", 3) as span:
+        try:
+            # Select music
+            from kairos.schemas.contracts import SimulationStats
 
-        stats_data = state.get("simulation_stats")
-        stats = SimulationStats(**stats_data) if stats_data else SimulationStats(
-            duration_sec=65.0,
-            peak_body_count=100,
-            avg_fps=30.0,
-            min_fps=28.0,
-            payoff_timestamp_sec=48.0,
-            total_frames=1950,
-            file_size_bytes=40_000_000,
-        )
+            stats_data = state.get("simulation_stats")
+            stats = SimulationStats(**stats_data) if stats_data else SimulationStats(
+                duration_sec=65.0,
+                peak_body_count=100,
+                avg_fps=30.0,
+                min_fps=28.0,
+                payoff_timestamp_sec=48.0,
+                total_frames=1950,
+                file_size_bytes=40_000_000,
+            )
 
-        logger.info("[video_editor_node] Selecting music track...")
-        music = await agent.select_music(concept, stats)
-        logger.info("[video_editor_node] OK Music: %s", music.track_id)
+            logger.info("[video_editor_node] Selecting music track...")
+            _t0 = time.monotonic()
+            music = await agent.select_music(concept, stats)
+            tracer.action(
+                "music:select",
+                input_summary=f"concept={concept.title[:60]}",
+                output_summary=f"{music.track_id} | {music.bpm} BPM | {music.mood}",
+                status="success",
+                duration_ms=int((time.monotonic() - _t0) * 1000),
+            )
+            logger.info("[video_editor_node] OK Music: %s", music.track_id)
 
-        # Generate captions
-        logger.info("[video_editor_node] Generating captions...")
-        theme_name = state.get("theme_name", "")
-        captions = await agent.generate_captions(concept, theme_name=theme_name)
-        logger.info("[video_editor_node] OK Captions generated (%d captions)", len(captions.captions))
+            # Generate captions
+            logger.info("[video_editor_node] Generating captions...")
+            _t0 = time.monotonic()
+            theme_name = state.get("theme_name", "")
+            captions = await agent.generate_captions(concept, theme_name=theme_name)
+            _caption_texts = " / ".join(c.text for c in captions.captions[:3]) if captions.captions else ""
+            tracer.action(
+                "captions:generate",
+                input_summary=f"concept={concept.title[:60]}, theme={theme_name or 'none'}",
+                output_summary=f"{len(captions.captions)} captions: {_caption_texts[:120]}",
+                status="success",
+                duration_ms=int((time.monotonic() - _t0) * 1000),
+            )
+            logger.info("[video_editor_node] OK Captions generated (%d captions)", len(captions.captions))
 
-        # Compose video
-        raw_video_path = state.get("raw_video_path", "")
-        logger.info("[video_editor_node] Composing final video with FFmpeg...")
-        video_output = await agent.compose_video(
-            raw_video_path=raw_video_path,
-            music=music,
-            captions=captions,
-            concept=concept,
-        )
-    except PipelineError as exc:
-        logger.error("[video_editor_node] Video assembly failed: %s", exc)
-        # Emit failure trace
-        tracer = get_tracer()
-        duration_ms = int((time.monotonic() - step_start) * 1000)
-        tracer.console(f"video_editor failed ({duration_ms}ms): {exc}", level="error", step_name="video_editor")
-        collect_llm_calls()  # drain buffer
-        return {
-            "status": "error",
-            "errors": [*state.get("errors", []), f"video_editor_node: {exc}"],
+            # Compose video
+            raw_video_path = state.get("raw_video_path", "")
+            logger.info("[video_editor_node] Composing final video with FFmpeg...")
+            _t0 = time.monotonic()
+            video_output = await agent.compose_video(
+                raw_video_path=raw_video_path,
+                music=music,
+                captions=captions,
+                concept=concept,
+            )
+            _final_size = 0
+            try:
+                import os as _os
+                _final_size = _os.path.getsize(video_output.final_video_path) // 1024 // 1024
+            except Exception:
+                pass
+            tracer.action(
+                "ffmpeg:compose",
+                input_summary=f"raw={raw_video_path.split('/')[-1] if raw_video_path else '?'}, music={music.track_id}",
+                output_summary=f"{video_output.final_video_path.split('/')[-1]}  ({_final_size}MB)",
+                status="success",
+                duration_ms=int((time.monotonic() - _t0) * 1000),
+            )
+        except PipelineError as exc:
+            logger.error("[video_editor_node] Video assembly failed: %s", exc)
+            span.fail(str(exc))
+            collect_llm_calls()
+            return {
+                "status": "error",
+                "errors": [*state.get("errors", []), f"video_editor_node: {exc}"],
+            }
+
+        logger.info("[video_editor_node] OK Video assembled: %s", video_output.final_video_path)
+        collect_thinking()
+        collect_llm_calls()
+        span.set_outputs({"final_video_path": video_output.final_video_path})
+
+        editor_result = {
+            "status": PipelineStatus.PENDING_REVIEW.value,
+            "captions": captions.model_dump(mode="json"),
+            "music_track": music.model_dump(mode="json"),
+            "final_video_path": video_output.final_video_path,
+            "video_output": video_output.model_dump(mode="json"),
+            "output_version": state.get("output_version", 0) + 1,
+            "errors": [],
         }
 
-    logger.info("[video_editor_node] OK Video assembled: %s", video_output.final_video_path)
+        # ── Step cache store ────────────────────────────────────────────────
+        if cache:
+            cache.put_step("video_editor_node", editor_result, editor_hash)
 
-    # Emit success trace
-    tracer = get_tracer()
-    duration_ms = int((time.monotonic() - step_start) * 1000)
-    collect_thinking()  # drain thinking buffer
-    collect_llm_calls()  # drain call buffer
-    tracer.console(f"video_editor completed in {duration_ms}ms", step_name="video_editor")
-
-    editor_result = {
-        "status": PipelineStatus.PENDING_REVIEW.value,
-        "captions": captions.model_dump(mode="json"),
-        "music_track": music.model_dump(mode="json"),
-        "final_video_path": video_output.final_video_path,
-        "video_output": video_output.model_dump(mode="json"),
-        "output_version": state.get("output_version", 0) + 1,
-        "errors": [],
-    }
-
-    # ── Step cache store ────────────────────────────────────────────────
-    if cache:
-        cache.put_step("video_editor_node", editor_result, editor_hash)
-
-    return editor_result
+        return editor_result
 
 
 async def human_review_node(state: dict[str, Any]) -> dict[str, Any]:
@@ -534,7 +553,6 @@ async def video_review_node(state: dict[str, Any]) -> dict[str, Any]:
     On failure: routes back to simulation_agent for a retry.
     On pass:    routes to audio_review.
     """
-    step_start = time.monotonic()
     attempt = state.get("video_review_attempts", 0) + 1
     logger.info("[video_review_node] Reviewing video (attempt %d/%d)", attempt, MAX_VIDEO_REVIEW_ATTEMPTS)
 
@@ -564,37 +582,29 @@ async def video_review_node(state: dict[str, Any]) -> dict[str, Any]:
         except Exception:
             pass
 
-    try:
-        review_result = await agent.review_video(final_video_path, concept)
-    except Exception as exc:
-        logger.error("[video_review_node] Video review failed: %s", exc)
-        # Emit failure trace
-        tracer = get_tracer()
-        duration_ms = int((time.monotonic() - step_start) * 1000)
-        tracer.console(f"video_review failed ({duration_ms}ms): {exc}", level="error", step_name="video_review")
-        collect_llm_calls()  # drain buffer
-        # On reviewer failure, pass through with warning (don't block pipeline)
-        return {
-            "video_review_result": None,
-            "video_review_attempts": attempt,
-            "errors": [*state.get("errors", []), f"video_review_node: {exc}"],
-        }
-
-    logger.info("[video_review_node] Result: %s", review_result.summary)
-
-    # Emit success trace
     tracer = get_tracer()
-    duration_ms = int((time.monotonic() - step_start) * 1000)
-    collect_llm_calls()  # drain buffer
-    tracer.console(
-        f"video_review completed in {duration_ms}ms (passed={review_result.passed})",
-        step_name="video_review",
-    )
+    with tracer.step("video_review", 4, attempt=attempt) as span:
+        try:
+            review_result = await agent.review_video(final_video_path, concept)
+        except Exception as exc:
+            logger.error("[video_review_node] Video review failed: %s", exc)
+            span.fail(str(exc))
+            collect_llm_calls()
+            # On reviewer failure, pass through with warning (don't block pipeline)
+            return {
+                "video_review_result": None,
+                "video_review_attempts": attempt,
+                "errors": [*state.get("errors", []), f"video_review_node: {exc}"],
+            }
 
-    return {
-        "video_review_result": review_result.model_dump(mode="json"),
-        "video_review_attempts": attempt,
-    }
+        logger.info("[video_review_node] Result: %s", review_result.summary)
+        collect_llm_calls()
+        span.set_outputs({"passed": review_result.passed, "summary": review_result.summary[:200]})
+
+        return {
+            "video_review_result": review_result.model_dump(mode="json"),
+            "video_review_attempts": attempt,
+        }
 
 
 async def audio_review_node(state: dict[str, Any]) -> dict[str, Any]:
@@ -606,7 +616,6 @@ async def audio_review_node(state: dict[str, Any]) -> dict[str, Any]:
     On failure: routes back to video_editor_agent for a re-edit.
     On pass:    routes to human_review.
     """
-    step_start = time.monotonic()
     attempt = state.get("audio_review_attempts", 0) + 1
     logger.info("[audio_review_node] Reviewing audio (attempt %d/%d)", attempt, MAX_AUDIO_REVIEW_ATTEMPTS)
 
@@ -633,37 +642,29 @@ async def audio_review_node(state: dict[str, Any]) -> dict[str, Any]:
                 expected_transcript += cap.get("text", "") + " "
         expected_transcript = expected_transcript.strip()
 
-    try:
-        review_result = await agent.review_audio(final_video_path, expected_transcript)
-    except Exception as exc:
-        logger.error("[audio_review_node] Audio review failed: %s", exc)
-        # Emit failure trace
-        tracer = get_tracer()
-        duration_ms = int((time.monotonic() - step_start) * 1000)
-        tracer.console(f"audio_review failed ({duration_ms}ms): {exc}", level="error", step_name="audio_review")
-        collect_llm_calls()  # drain buffer
-        # On reviewer failure, pass through with warning
-        return {
-            "audio_review_result": None,
-            "audio_review_attempts": attempt,
-            "errors": [*state.get("errors", []), f"audio_review_node: {exc}"],
-        }
-
-    logger.info("[audio_review_node] Result: %s", review_result.summary)
-
-    # Emit success trace
     tracer = get_tracer()
-    duration_ms = int((time.monotonic() - step_start) * 1000)
-    collect_llm_calls()  # drain buffer
-    tracer.console(
-        f"audio_review completed in {duration_ms}ms (passed={review_result.passed})",
-        step_name="audio_review",
-    )
+    with tracer.step("audio_review", 5, attempt=attempt) as span:
+        try:
+            review_result = await agent.review_audio(final_video_path, expected_transcript)
+        except Exception as exc:
+            logger.error("[audio_review_node] Audio review failed: %s", exc)
+            span.fail(str(exc))
+            collect_llm_calls()
+            # On reviewer failure, pass through with warning
+            return {
+                "audio_review_result": None,
+                "audio_review_attempts": attempt,
+                "errors": [*state.get("errors", []), f"audio_review_node: {exc}"],
+            }
 
-    return {
-        "audio_review_result": review_result.model_dump(mode="json"),
-        "audio_review_attempts": attempt,
-    }
+        logger.info("[audio_review_node] Result: %s", review_result.summary)
+        collect_llm_calls()
+        span.set_outputs({"passed": review_result.passed, "summary": review_result.summary[:200]})
+
+        return {
+            "audio_review_result": review_result.model_dump(mode="json"),
+            "audio_review_attempts": attempt,
+        }
 
 
 # =============================================================================
@@ -780,6 +781,19 @@ def route_after_video_review(state: dict[str, Any]) -> str:
     passed = review_data.get("passed", True) if isinstance(review_data, dict) else True
 
     if passed:
+        return "audio_review"
+
+    # If every issue is reviewer_error (e.g. model 404, model not pulled),
+    # re-simulating won't fix the reviewer — proceed to audio review.
+    issues = review_data.get("issues", []) if isinstance(review_data, dict) else []
+    if issues and all(
+        (i.get("category") if isinstance(i, dict) else getattr(i, "category", None)) == "reviewer_error"
+        for i in issues
+    ):
+        logger.warning(
+            "Video review failed due to reviewer infrastructure error (e.g. model unavailable) — "
+            "skipping re-simulation and proceeding to audio review"
+        )
         return "audio_review"
 
     # Failed — try re-simulation if attempts remain

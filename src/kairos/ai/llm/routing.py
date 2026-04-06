@@ -307,7 +307,7 @@ litellm.set_verbose = False
 
 def _load_model_alias_map() -> dict[str, str]:
     """Build alias → real-model map from litellm_config.yaml."""
-    config_path = Path(__file__).resolve().parent.parent.parent.parent / "litellm_config.yaml"
+    config_path = Path(__file__).resolve().parent.parent.parent.parent.parent / "litellm_config.yaml"
     if not config_path.exists():
         logger.warning("litellm_config.yaml not found at %s — no aliases loaded", config_path)
         return {}
@@ -328,7 +328,7 @@ def _load_model_alias_map() -> dict[str, str]:
 
 def _load_model_api_bases() -> dict[str, str]:
     """Build alias → api_base map from litellm_config.yaml."""
-    config_path = Path(__file__).resolve().parent.parent.parent.parent / "litellm_config.yaml"
+    config_path = Path(__file__).resolve().parent.parent.parent.parent.parent / "litellm_config.yaml"
     if not config_path.exists():
         return {}
     try:
@@ -458,6 +458,12 @@ def call_ollama_direct(
     }
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
+        # Some thinking models (e.g. GLM-4.7-flash) ignore /nothink and only
+        # respect an explicit {"think": false} API option.  Add it when the
+        # model capabilities class confirms thinking support.
+        caps = get_capabilities(resolved)
+        if caps.supports_thinking:
+            payload["think"] = False
 
     logger.info(
         "[ollama_direct] Calling %s (json_mode=%s, timeout=%ds, max_tokens=%d)",
@@ -677,6 +683,7 @@ async def call_llm_code(
             trace_llm_call(
                 trace_name=f"call_llm_code:{model}",
                 model=model,
+                model_resolved=resolved_model,
                 input_messages=messages,
                 output=result,
                 tokens_in=tokens_in,
@@ -846,6 +853,7 @@ async def call_llm(
             trace_llm_call(
                 trace_name=f"call_llm:{model}",
                 model=model,
+                model_resolved=resolved_model,
                 input_messages=messages,
                 output=result,
                 tokens_in=tokens_in,
@@ -977,6 +985,7 @@ async def call_with_quality_fallback(
                 trace_llm_call(
                     trace_name=f"quality_fallback:{primary_model}",
                     model=primary_model,
+                    model_resolved=resolved_primary,
                     input_messages=messages,
                     output=result,
                     latency_ms=latency,
@@ -1001,6 +1010,7 @@ async def call_with_quality_fallback(
             trace_llm_call(
                 trace_name=f"quality_fallback:{primary_model}",
                 model=primary_model,
+                model_resolved=resolved_primary,
                 input_messages=messages,
                 output=result,
                 latency_ms=latency,
@@ -1020,20 +1030,22 @@ async def call_with_quality_fallback(
                 model_type=primary_caps.model_type,
                 provider=primary_caps.family_name,
             )
-        except Exception:
+        except Exception as exc:
             logger.warning(
                 "%s failed, falling back to %s",
                 primary_model,
                 fallback_model,
                 exc_info=True,
             )
+            _exc_detail = f"{type(exc).__name__}: {exc}"
             trace_llm_call(
                 trace_name=f"quality_fallback:{primary_model}",
                 model=primary_model,
+                model_resolved=resolved_primary,
                 input_messages=messages,
                 output=None,
                 status="error",
-                error=f"Exception, falling back to {fallback_model}",
+                error=f"{_exc_detail} — falling back to {fallback_model}",
             )
             _record_llm_call(
                 model_alias=primary_model,
@@ -1043,7 +1055,7 @@ async def call_with_quality_fallback(
                 tokens_in=0, tokens_out=0, cost_usd=0.0,
                 latency_ms=0,
                 status="error",
-                error=f"Exception, falling back to {fallback_model}",
+                error=f"{_exc_detail} — falling back to {fallback_model}",
                 model_type=primary_caps.model_type,
                 provider=primary_caps.family_name,
             )
@@ -1093,6 +1105,7 @@ async def call_with_quality_fallback(
     trace_llm_call(
         trace_name=f"quality_fallback:{fallback_model}",
         model=fallback_model,
+        model_resolved=resolved_fallback,
         input_messages=messages,
         output=cloud_result,
         tokens_in=fb_tokens_in,

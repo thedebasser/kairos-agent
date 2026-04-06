@@ -222,6 +222,33 @@ class DominoIdeaAgent(IdeaAgent):
             "path_cycles": 2.0,     # more visual variety on longer paths
             "duration_sec": 65,
         }
+
+        # ── Calibration lookup (overrides physics when enabled) ──────
+        from kairos.config import get_settings
+        settings = get_settings()
+        if settings.calibration_enabled:
+            try:
+                from kairos.calibration.knowledge_base import KnowledgeBase
+                from kairos.calibration.scenario import blender_config_to_scenario
+
+                # Build a ScenarioDescriptor from the current overrides
+                scenario = blender_config_to_scenario(overrides)
+                kb = KnowledgeBase()
+                calibrated = kb.lookup_starting_params(scenario)
+
+                if calibrated:
+                    # Apply calibrated physics on top of locked overrides
+                    for key, val in calibrated.items():
+                        if key in overrides:
+                            overrides[key] = val
+                    logger.info(
+                        "[domino_idea] Calibration applied: %s",
+                        {k: calibrated[k] for k in calibrated if k in overrides},
+                    )
+                else:
+                    logger.info("[domino_idea] No calibration match — using locked defaults")
+            except Exception as exc:
+                logger.warning("[domino_idea] Calibration lookup failed: %s", exc)
         if result.seed == 0:
             overrides["seed"] = random.randint(1, 2**31)  # noqa: S311
         result = result.model_copy(update=overrides)

@@ -39,6 +39,7 @@ from kairos.schemas.contracts import (
 )
 from kairos.ai.llm.config import get_step_config
 from kairos.ai.llm.routing import _record_llm_call
+from kairos.ai.tracing.sinks.langfuse_sink import trace_llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -650,6 +651,18 @@ class AudioReviewAgent(_AudioReviewAgentBase):
                     raw_response=raw_text,
                     raw_thinking=raw_thinking,
                 )
+                trace_llm_call(
+                    trace_name=f"audio_review:{model_alias}",
+                    model=ollama_resp.model,
+                    input_messages=messages,
+                    output=raw_text,
+                    tokens_in=ollama_resp.tokens_in,
+                    tokens_out=ollama_resp.tokens_out,
+                    cost_usd=0.0,
+                    latency_ms=llm_latency,
+                    status="success",
+                    thinking=raw_thinking,
+                )
 
                 # Validate: try parse as structured JSON
                 passed, issues = _parse_audio_review_response(raw_text, model_alias)
@@ -704,6 +717,18 @@ class AudioReviewAgent(_AudioReviewAgentBase):
                     error=str(exc),
                     model_type="local",
                     provider="ollama",
+                )
+                trace_llm_call(
+                    trace_name=f"audio_review:{model_alias}",
+                    model=model_alias,
+                    input_messages=messages,
+                    output=None,
+                    tokens_in=0,
+                    tokens_out=0,
+                    cost_usd=0.0,
+                    latency_ms=llm_latency,
+                    status="error",
+                    error=str(exc),
                 )
                 raise  # re-raise so caller handles fallback
 

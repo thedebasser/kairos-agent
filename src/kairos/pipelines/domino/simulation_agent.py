@@ -598,25 +598,47 @@ class DominoSimulationAgent(SimulationAgent):
         result = SimulationLoopResult()
         blend_path = ""
 
+        from kairos.ai.tracing.tracer import get_tracer
+        tracer = get_tracer()
+
         for iteration in range(1, MAX_ITERATIONS + 1):
             result.simulation_iteration = iteration
             logger.info("[domino_sim] === Iteration %d/%d ===", iteration, MAX_ITERATIONS)
 
             # Step 1: Generate course
+            t0 = time.monotonic()
             if iteration == 1:
                 blend_path = await self.generate_simulation(concept)
+                _dur = int((time.monotonic() - t0) * 1000)
+                tracer.action(
+                    "blender:generate_course",
+                    input_summary=f"archetype={concept.visual_brief[:60] if concept and concept.visual_brief else 'default'}, iter={iteration}",
+                    output_summary=f"{Path(blend_path).name}",
+                    status="success",
+                    duration_ms=_dur,
+                )
             else:
                 blend_path = await self.adjust_parameters(
                     blend_path,
                     result.validation_result,  # type: ignore[arg-type]
                     iteration,
                 )
+                _dur = int((time.monotonic() - t0) * 1000)
+                tracer.action(
+                    "blender:regenerate_course",
+                    input_summary=f"iter={iteration}, adjusting physics params",
+                    output_summary=f"{Path(blend_path).name}",
+                    status="success",
+                    duration_ms=_dur,
+                )
 
             result.simulation_code = blend_path
 
             # Step 2: Validate
+            t0 = time.monotonic()
             validation = await self.validate_output(blend_path)
             result.validation_result = validation
+            _dur = int((time.monotonic() - t0) * 1000)
 
             if not validation.passed:
                 failed = [c.name for c in validation.failed_checks]
@@ -624,12 +646,26 @@ class DominoSimulationAgent(SimulationAgent):
                     "[domino_sim] Validation failed on iter %d: %s",
                     iteration, ", ".join(failed),
                 )
+                tracer.action(
+                    "blender:validate",
+                    input_summary=f"{Path(blend_path).name}",
+                    output_summary=f"FAILED: {', '.join(failed)}",
+                    status="error",
+                    duration_ms=_dur,
+                )
                 if iteration >= MAX_ITERATIONS:
                     logger.error("[domino_sim] Max iterations reached, proceeding anyway")
                     break
                 continue
 
             logger.info("[domino_sim] Validation passed on iteration %d", iteration)
+            tracer.action(
+                "blender:validate",
+                input_summary=f"{Path(blend_path).name}",
+                output_summary=f"PASSED ({len(validation.checks)} checks)",
+                status="success",
+                duration_ms=_dur,
+            )
             break
 
         # Step 3: Prepare environment (download HDRI, textures, SFX pool)
@@ -649,15 +685,36 @@ class DominoSimulationAgent(SimulationAgent):
                 env_result.get("hdri_downloaded"),
                 env_result.get("ground_texture_downloaded"),
             )
+            tracer.action(
+                "environment:prepare",
+                input_summary=f"theme={env_result.get('theme_name', theme_name or 'random')}",
+                output_summary=f"hdri={'yes' if env_result.get('hdri_downloaded') else 'no'}, ground={'yes' if env_result.get('ground_texture_downloaded') else 'no'}",
+                status="success",
+            )
         except Exception as exc:
             logger.warning("[domino_sim] Environment preparation failed (non-fatal): %s", exc)
+            tracer.action(
+                "environment:prepare",
+                input_summary=f"theme={theme_name or 'random'}",
+                output_summary=f"skipped: {exc}",
+                status="skipped",
+            )
 
         # Step 4: Bake & render
         logger.info("[domino_sim] Baking and rendering...")
+        t0 = time.monotonic()
         sim_result = await self.execute_simulation(blend_path)
         result.simulation_result = sim_result
+        _render_dur = int((time.monotonic() - t0) * 1000)
 
         if sim_result.returncode != 0:
+            tracer.action(
+                "blender:bake_render",
+                input_summary=f"{Path(blend_path).name}",
+                output_summary=f"FAILED: {sim_result.stderr[:200] if sim_result.stderr else 'unknown error'}",
+                status="error",
+                duration_ms=_render_dur,
+            )
             msg = f"Bake/render failed: {sim_result.stderr[:500]}"
             raise SimulationExecutionError(msg)
 
@@ -672,7 +729,21 @@ class DominoSimulationAgent(SimulationAgent):
                 "[domino_sim] Render complete: %s (%.1fs, %d bytes)",
                 video_path, stats.duration_sec, stats.file_size_bytes,
             )
+            tracer.action(
+                "blender:bake_render",
+                input_summary=f"{Path(blend_path).name}",
+                output_summary=f"{Path(video_path).name} ({stats.file_size_bytes // 1024 // 1024}MB, {stats.total_frames} frames, {stats.duration_sec:.1f}s)",
+                status="success",
+                duration_ms=_render_dur,
+            )
         else:
+            tracer.action(
+                "blender:bake_render",
+                input_summary=f"{Path(blend_path).name}",
+                output_summary="no video file produced",
+                status="error",
+                duration_ms=_render_dur,
+            )
             raise SimulationExecutionError("No video file produced by bake_and_render")
 
         # ── Cache store ──────────────────────────────────────────────

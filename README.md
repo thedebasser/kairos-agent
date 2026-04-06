@@ -1,340 +1,237 @@
 # Kairos Agent
 
-Automated simulation content pipeline for generating short-form videos from programmatic physics simulations.
+**Autonomous AI pipeline that generates short-form simulation videos end-to-end** — from concept ideation through physics simulation, video assembly, quality review, and publishing.
 
-## Overview
+LLM-powered agents orchestrated by LangGraph collaborate to produce satisfying 9:16 portrait physics videos (ball pits, domino chains, marble funnels, destruction scenes) with no human intervention required beyond a final approve/reject gate.
 
-Kairos Agent uses LLM-powered agents orchestrated by LangGraph to:
-1. **Generate concepts** — Idea Agent selects categories (with rotation rules) and creates visual briefs
-2. **Build simulations** — Simulation Agent generates Pygame+Pymunk code, executes in Docker sandbox, validates output
-3. **Assemble videos** — Video Editor Agent adds captions, music, and produces final 9:16 portrait videos
-4. **Human review** — FastAPI dashboard for approve/reject workflow
-5. **Publish** — Queue-based publishing to multiple platforms
+> **Status:** Active development. 600 tests passing. Physics and domino pipelines operational.
 
-## Quick Start
+---
 
-### Prerequisites
-- Python 3.12+
-- Docker & Docker Compose
-- NVIDIA GPU with CUDA (for Ollama local models)
-- FFmpeg
+## Why This Project Exists
 
-### Setup
+Most "AI agent" demos are thin wrappers around a single API call. Kairos is a **genuine multi-agent system** that makes real decisions:
 
-```bash
-# Clone and enter
-cd kairos-agent
+- **Agents don't see each other's code.** The Idea Agent, Simulation Agent, and Video Editor are plain Python classes behind abstract interfaces. LangGraph orchestrates them, but they have zero framework dependency.
+- **Agents iterate on failure.** A simulation that fails validation triggers config adjustment (not regeneration from scratch). Video and audio quality gates route back to earlier agents when they detect problems.
+- **The system learns.** Every successful cloud LLM call is stored as training data. Category knowledge accumulates in the database. Prompts are enriched with few-shot examples from verified runs.
+- **Cost is managed.** Local Ollama models handle routine work; Claude is reserved for complex generation. Token counts and costs are tracked per-call and surfaced in traces and the dashboard.
 
-# Copy environment file
-cp .env.example .env
-# Edit .env with your API keys
-
-# Start infrastructure
-docker compose up -d
-
-# Create Python environment
-python -m venv .venv
-.venv\Scripts\activate  # Windows
-# source .venv/bin/activate  # Linux/macOS
-
-# Install dependencies
-pip install -e ".[dev]"
-
-# Run database migration
-psql -h localhost -U kairos -d kairos -f migrations/001_initial_schema.sql
-
-# Pull Ollama models
-ollama pull mistral:7b-instruct-q4_0
-ollama pull llama3.1:8b
-ollama pull moondream2
-
-# Build sandbox image
-docker build -t kairos-sandbox sandbox/
-
-# Install pre-commit hooks
-pre-commit install
-
-# Run tests
-pytest tests/unit/ -m unit
-```
-
-### Run Pipeline
-
-```bash
-pipeline run --pipeline physics
-pipeline resume <run-id>
-pipeline status
-```
+---
 
 ## Architecture
 
+```mermaid
+graph LR
+    subgraph Orchestrator["LangGraph State Machine"]
+        direction LR
+        IA[Idea Agent] --> SA[Simulation Agent]
+        SA --> VE[Video Editor]
+        VE --> VR[Video Review]
+        VR --> AR[Audio Review]
+        AR --> HR[Human Review]
+        HR --> PQ[Publish Queue]
+    end
+
+    SA -. "retry / adjust" .-> SA
+    VR -. "re-simulate" .-> SA
+    AR -. "re-edit" .-> VE
+    HR -. "bad concept" .-> IA
+    HR -. "bad sim" .-> SA
+
+    subgraph Engines
+        PM[Pygame + Pymunk]
+        BL[Blender 3D]
+    end
+
+    subgraph Services
+        VAL[Validation]
+        FF[FFmpeg]
+        MUS[Music Selector]
+        CAP[Captions + TTS]
+    end
+
+    subgraph AI
+        LLM[LLM Router<br/>Local ↔ Cloud]
+        TR[Tracing<br/>JSONL · Langfuse · DB]
+        LL[Learning Loop]
+    end
+
+    SA --> PM
+    SA --> BL
+    VE --> FF
+    VE --> MUS
+    VE --> CAP
+    IA --> LLM
+    SA --> LLM
+    VR --> LLM
 ```
-LangGraph State Machine
-├── Idea Agent (concept generation + category rotation)
-├── Simulation Agent (code gen → sandbox exec → validate → iterate)
-├── Video Editor Agent (captions + music + FFmpeg assembly)
-├── Human Review (FastAPI dashboard, LangGraph interrupt)
-└── Publish Queue (Celery + platform adapters)
-```
+
+### How a Run Works
+
+1. **Idea Agent** — Analyses category stats (SQL, no LLM), selects the next category via programmatic rotation rules, then generates a `ConceptBrief` via Claude with Instructor structured output.
+2. **Simulation Agent** — LLM generates a JSON config (not raw code). A fixed template per category renders it into runnable Pygame+Pymunk or Blender code. Executes in a Docker sandbox. Validates output. Adjusts config and retries up to 5 times.
+3. **Video Editor Agent** — Selects music by mood tags, generates captions, assembles the final 9:16 video via FFmpeg.
+4. **Video Review** — Vision LLM extracts frames and evaluates visual quality. Routes back to Simulation Agent if it detects problems.
+5. **Audio Review** — Omni-modal LLM + FFmpeg ebur128 loudness analysis. Routes back to Video Editor if audio is poor.
+6. **Human Review** — Pipeline pauses (LangGraph interrupt). Dashboard shows video + concept summary for one-click approve/reject.
+7. **Publish** — Approved videos enter the distribution queue.
+
+Every step is **cached by input hash** — reruns skip completed work at zero cost. Every LLM call is **traced** to JSONL files, Langfuse, and PostgreSQL simultaneously.
+
+---
 
 ## Project Structure
 
 ```
 src/kairos/
-├── agents/          # LLM agent implementations
-├── pipeline/        # Pipeline registry & orchestration
-├── pipelines/       # Pipeline adapters (physics, future: chemistry, etc.)
-├── services/        # Business logic (validation, sandbox, captions, etc.)
-├── db/              # Database models & operations
-├── models/          # Pydantic data contracts
-├── config.py        # Settings (from .env)
-├── exceptions.py    # Exception hierarchy
-└── cli.py           # CLI entry point
+├── orchestrator/        # LangGraph graph, state, routing logic, registry
+├── pipelines/           # Pipeline adapters + per-pipeline agents
+│   ├── adapters/        #   @register_pipeline implementations
+│   ├── physics/         #   Pygame+Pymunk agents, templates, models
+│   ├── domino/          #   Blender domino agents + models
+│   └── marble/          #   Blender marble agents + models
+├── ai/                  # AI layer (no business logic)
+│   ├── llm/             #   LiteLLM routing, config, capabilities
+│   ├── tracing/         #   RunTracer, event models, sinks (JSONL, Langfuse, DB)
+│   ├── prompts/         #   Jinja2 templates per agent per pipeline
+│   ├── review/          #   Shared video/audio review agents
+│   └── learning/        #   Training data collection + few-shot injection
+├── services/            # Engine-agnostic business logic
+│   ├── validation.py    #   Two-tier video validation (programmatic + AI)
+│   ├── async_subprocess.py  # Async FFmpeg/FFprobe utilities
+│   ├── audio/           #   SFX pool, Freesound, synthetic, mixing
+│   └── environment/     #   Blender environment theming
+├── engines/             # Execution backends
+│   ├── pymunk/          #   Docker sandbox for Pygame+Pymunk
+│   └── blender/         #   Blender subprocess orchestrator
+├── schemas/             # All Pydantic contracts (90+ models)
+├── db/                  # SQLAlchemy models + async operations
+├── api/                 # FastAPI app, REST routes, WebSocket streams
+├── web/                 # Review dashboard (Jinja2 templates)
+├── eval/                # Evaluation harness + regression tests
+├── cli/                 # CLI entry points
+└── config.py            # pydantic-settings from .env
 ```
-
-## Testing
-
-```bash
-pytest tests/unit/ -m unit              # Fast unit tests
-pytest tests/integration/ -m integration # Requires Docker services
-pytest tests/pipelines/ -m pipeline      # Pipeline interface tests
-pytest tests/quality/ -m quality         # Video quality checks
-```
-
-## Implementation Plan
-
-This project follows a 16-step implementation plan across 5 phases. See [docs/implementation-document.md](docs/implementation-document.md) for full spec.
-
-### Phase 1: Foundation
-| Step | Description | Status |
-|------|-------------|--------|
-| 1 | Repository, Environment & Quality Gates | ✅ Complete |
-| 2 | Database Schema & Migrations | ✅ Complete |
-| 3 | LiteLLM Proxy & Instructor Setup | ✅ Complete |
-| 4 | Simulation Sandbox | ✅ Complete |
-
-### Phase 2: Agents (Individual)
-| Step | Description | Status |
-|------|-------------|--------|
-| 5 | Validation Engine | ✅ Complete |
-| 6 | Simulation Agent | ✅ Complete |
-| 7 | Idea Agent | ✅ Complete |
-| 8 | Video Editor Agent | ✅ Complete |
-
-### Phase 3: Orchestration & Review
-| Step | Description | Status |
-|------|-------------|--------|
-| 9 | LangGraph Pipeline | ⬜ Not started |
-| 10 | Human Review Dashboard | ⬜ Not started |
-| 11 | Monitoring & Observability | ⬜ Not started |
-
-### Phase 4: Distribution
-| Step | Description | Status |
-|------|-------------|--------|
-| 12 | Upload & Publishing Service | ⬜ Not started |
-| 13 | Analytics Sync | ⬜ Not started |
-
-### Phase 5: Hardening
-| Step | Description | Status |
-|------|-------------|--------|
-| 14 | Regression Test Suite | ⬜ Not started |
-| 15 | Production Burn-In | ⬜ Not started |
-| 16 | Documentation & Handoff | ⬜ Not started |
-
-## License
-
-Private — All rights reserved.
 
 ---
 
-## New Machine Setup Guide (Windows)
-
-Step-by-step instructions for getting Kairos Agent running from scratch on a fresh Windows machine. Last verified: 2026-02-28.
+## Quick Start
 
 ### Prerequisites
 
-Install these before anything else:
+| Tool | Version | Notes |
+|------|---------|-------|
+| Python | 3.12+ | 3.13 tested |
+| Docker + Compose | 4.x+ | For PostgreSQL + simulation sandbox |
+| FFmpeg | 6.x+ | `winget install Gyan.FFmpeg` |
+| Ollama | latest | For local LLMs (optional — cloud-only mode works) |
 
-| Tool | Min Version | Install |
-|------|-------------|---------|
-| **Python** | 3.12+ | https://www.python.org/downloads/ |
-| **Docker Desktop** | 4.x+ | https://www.docker.com/products/docker-desktop/ |
-| **Git** | 2.x+ | https://git-scm.com/downloads |
-| **FFmpeg** | 6.x+ | `winget install Gyan.FFmpeg` (restart terminal after) |
-| **NVIDIA GPU + CUDA** | — | Required for local LLMs via Ollama |
-| **Ollama** | latest | https://ollama.com/download or run via Docker |
+### Install
 
-**Microsoft C++ Build Tools** are also required for `chromadb` (the `chroma-hnswlib` package compiles from source on Python 3.13+):
-
-```powershell
-winget install Microsoft.VisualStudio.2022.BuildTools --override "--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended" --accept-package-agreements --accept-source-agreements
-```
-
-> **Note:** If you already have Visual Studio 2022 Community/Pro, ensure the "Desktop development with C++" workload is installed via the Visual Studio Installer.
-
-Verify prerequisites:
-
-```powershell
-python --version      # 3.12+
-docker --version      # 20+
-git --version         # 2+
-ffmpeg -version       # 6+
-nvidia-smi            # Should show your GPU
-```
-
-### Step 1: Clone & Enter
-
-```powershell
-git clone <your-repo-url> kairos-agent
+```bash
+git clone https://github.com/thedebasser/kairos-agent.git
 cd kairos-agent
-```
 
-### Step 2: Configure Environment
+cp .env.example .env           # Edit with your API keys
+docker compose up -d postgres  # Start database
 
-Copy or create `.env` from `.env.example`. Key values:
-
-```env
-ANTHROPIC_API_KEY="sk-ant-..."
-DATABASE_URL="postgresql+asyncpg://kairos:changeme@localhost:5434/kairos"
-DATABASE_URL_SYNC="postgresql://kairos:changeme@localhost:5434/kairos"
-POSTGRES_PORT="5434"
-OLLAMA_BASE_URL="http://localhost:11434"
-REDIS_URL="redis://localhost:6379/0"
-```
-
-> **Port conflict note:** The Docker Postgres runs on port **5434** to avoid conflicts with any locally installed PostgreSQL (which commonly uses 5432 or 5433). If you have no local Postgres, you can change this back to 5433 in both `docker-compose.yml` and `.env`.
-
-### Step 3: Start Docker Services
-
-```powershell
-# Start Postgres, Redis, and ChromaDB (not Ollama — see Step 5)
-docker compose up -d postgres redis chromadb
-```
-
-If you see container name conflicts from a previous setup:
-```powershell
-docker rm -f kairos-postgres kairos-redis kairos-chromadb
-docker compose up -d postgres redis chromadb
-```
-
-Verify they're running:
-```powershell
-docker ps --filter "name=kairos"
-# All 3 should show "healthy" after ~30 seconds
-```
-
-The database migration runs automatically — the SQL file is mounted to `docker-entrypoint-initdb.d`. Verify:
-```powershell
-docker exec kairos-postgres psql -U kairos -d kairos -c "\dt"
-# Should show 10 tables
-```
-
-### Step 4: Create Virtual Environment & Install Dependencies
-
-```powershell
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+.venv\Scripts\activate         # Windows
 pip install -e ".[dev]"
+
+docker build -t kairos-sandbox sandbox/  # Build simulation sandbox
 ```
 
-This installs all 200+ dependencies including LangGraph, LiteLLM, Instructor, ChromaDB, FastAPI, etc. The `chroma-hnswlib` package compiles from C++ source — this is why the Build Tools are required.
+### Run
 
-Verify:
-```powershell
-python -c "import kairos; print('OK')"
-pipeline --help
+```bash
+pipeline run --pipeline physics    # Full autonomous run
+pipeline run --pipeline domino     # Domino chain pipeline
+pipeline status                    # Check running/completed
+pipeline resume <run-id>           # Resume interrupted run
 ```
 
-### Step 5: Set Up Ollama (Local LLMs)
+### Test
 
-For best GPU performance on RTX 3090, run Ollama **natively** on the host (not in Docker). If you already have Ollama running (e.g., via Open WebUI), skip the install.
-
-If Ollama is not installed:
-```powershell
-winget install Ollama.Ollama
-# Restart terminal, then:
-ollama serve  # Start the server (or it may auto-start as a service)
+```bash
+pytest tests/ -q --timeout=60     # Full suite (~600 tests)
+pytest tests/unit/ -m unit        # Fast unit tests only
+pytest tests/integration/         # Requires Docker services
 ```
 
-Pull the required models:
-```powershell
-# If Ollama CLI is on PATH:
-ollama pull mistral:7b-instruct-q4_0
-ollama pull llama3.1:8b
+---
 
-# If running Ollama in Docker:
-docker exec <ollama-container-name> ollama pull mistral:7b-instruct-q4_0
-docker exec <ollama-container-name> ollama pull llama3.1:8b
-```
+## Design Decisions
 
-> **Note:** `moondream2` (vision model for Tier 2 frame inspection) is no longer available in the Ollama registry as of Feb 2026. This feature is not yet implemented and is safely skipped.
+Key architectural choices and the reasoning behind them. Full ADRs in [docs/adr/](docs/adr/).
 
-Verify Ollama has the models:
-```powershell
-# Via API:
-Invoke-RestMethod http://localhost:11434/api/tags | Select-Object -ExpandProperty models | Select-Object name
-# Should show: mistral:7b-instruct-q4_0, llama3.1:8b
-```
+| Decision | Choice | Why |
+|----------|--------|-----|
+| Agent ↔ orchestrator separation | Agents are plain classes behind ABCs; LangGraph only orchestrates | Agents are testable in isolation, swappable, and have no framework lock-in |
+| Config-based simulation | LLM generates JSON configs, not raw code | Fixed templates + constrained configs reduce hallucination vs raw code generation |
+| Local-first LLM routing | Ollama for routine work, Claude for generation | ~$0.02/run vs ~$0.15/run. Cloud responses become training data for local models |
+| Pluggable tracing sinks | JSONL files + Langfuse + PostgreSQL in parallel | Files for debugging, Langfuse for dashboards, DB for queries. No single point of failure |
+| Step-level input-hash caching | Each node hashes its relevant state fields | Reruns and retries skip completed work. Cache hit = zero cost, zero latency |
+| Prompt templates as files | Jinja2 `.txt` files in `ai/prompts/` | Prompts are diffable, reviewable in PRs, and version-controlled like code |
+| Two-tier validation | Tier 1: programmatic (FFprobe). Tier 2: AI (vision model) | Fast gate filters obvious failures. AI catches subtle quality issues |
 
-### Step 6: Enable Local LLMs
+---
 
-Edit `llm_config.yaml` and set:
-```yaml
-use_local_llms: true
-```
+## Cost Characteristics
 
-This tells the pipeline to try local Ollama models first before falling back to Claude (cloud). See the config file for which steps use local vs cloud models.
+| Scenario | Typical Cost | Model Mix |
+|----------|-------------|-----------|
+| Successful physics run (no retries) | ~$0.02 | Ollama local for config, Claude for concept |
+| Physics run with 3 simulation retries | ~$0.06 | Extra config adjustment calls |
+| Full cloud-only run | ~$0.15 | All calls to Claude |
+| Eval suite (10 cases) | ~$0.30 | Concept + simulation for each |
 
-### Step 7: Build Sandbox Image
+Token counts and costs are tracked per-call via `_extract_usage()` and surfaced in traces, the database, and the dashboard.
 
-The sandbox is a Docker image used to safely execute agent-generated simulation code:
+---
 
-```powershell
-docker build -t kairos-sandbox sandbox/
-```
+## Known Limitations
 
-### Step 8: Verify Everything
+- **Marble pipeline** is under redesign — ramp geometry and Blender camera placement need work.
+- **Tier 2 validation** (AI frame inspection) is implemented but the original vision model (`moondream2`) was removed from Ollama's registry. Qwen3-VL is used for video review instead.
+- **Publishing** is queue-ready but platform adapters (TikTok, YouTube Shorts, Instagram Reels) are not yet implemented.
+- **Windows-primary development** — tested on Windows 11 with WSL2 Docker. Linux/macOS should work but isn't CI-verified.
+- Two `test_graph.py` ordering-dependent tests fail when run in the full suite but pass in isolation.
 
-Run the full verification:
+---
 
-```powershell
-python -c "
-import redis, httpx, psycopg2
-# Postgres
-conn = psycopg2.connect(host='127.0.0.1', port=5434, dbname='kairos', user='kairos', password='changeme')
-cur = conn.cursor(); cur.execute('SELECT count(*) FROM information_schema.tables WHERE table_schema=''public''')
-print(f'Postgres: {cur.fetchone()[0]} tables'); cur.close(); conn.close()
-# Redis
-r = redis.Redis.from_url('redis://localhost:6379/0'); r.ping(); print('Redis: OK')
-# Ollama
-resp = httpx.get('http://localhost:11434/api/tags')
-print(f'Ollama models: {[m[\"name\"] for m in resp.json()[\"models\"]]}')
-# ChromaDB
-resp = httpx.get('http://localhost:8000/api/v2/heartbeat')
-print(f'ChromaDB: OK')
-"
-```
+## Documentation
 
-Run unit tests:
-```powershell
-pytest tests/unit/ -q --timeout=30
-# Expect ~280+ passed
-```
+| Document | Description |
+|----------|-------------|
+| [docs/architecture.md](docs/architecture.md) | Deep technical walkthrough of every layer |
+| [docs/lessons-learned.md](docs/lessons-learned.md) | Honest post-mortem: what worked, what didn't, what I'd change |
+| [docs/adr/](docs/adr/) | Architecture Decision Records for every major choice |
+| [docs/agent-reference.md](docs/agent-reference.md) | Per-agent reference: prompts, models, call patterns |
+| [docs/setup-guide.md](docs/setup-guide.md) | Detailed new-machine setup walkthrough |
+| [docs/refactor-design-doc.md](docs/refactor-design-doc.md) | The 5-phase refactor plan that shaped this codebase |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Development workflow, conventions, testing |
 
-### Run the Pipeline
+---
 
-```powershell
-pipeline run --pipeline physics
-pipeline status
-pipeline resume <run-id>
-```
+## Tech Stack
 
-### Troubleshooting
+| Layer | Technology |
+|-------|-----------|
+| Orchestration | LangGraph 0.3 |
+| LLM routing | LiteLLM + Instructor (structured output) |
+| Models | Claude Sonnet (cloud), Mistral 7B / Llama 3.1 8B (local via Ollama) |
+| Simulation | Pygame 2.6 + Pymunk 6.8 (physics), Blender 3D (domino/marble) |
+| Video | FFmpeg (composition, validation, frame extraction) |
+| Database | PostgreSQL 16 + SQLAlchemy 2 (async) + Alembic |
+| API | FastAPI + WebSocket (live event streaming) |
+| Tracing | Custom RunTracer → JSONL files, Langfuse, PostgreSQL |
+| Testing | pytest + pytest-asyncio (600 tests, ~50s) |
+| Config | pydantic-settings from `.env` |
 
-| Issue | Fix |
-|-------|-----|
-| `chroma-hnswlib` build fails | Install C++ Build Tools (see Prerequisites) |
-| Postgres password auth fails | Port conflict with local Postgres — check `netstat -ano \| Select-String ":5434"` |
-| FFmpeg not found after install | Refresh PATH: `$env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")` |
-| Doppler env vars cause `extra_forbidden` error | Already fixed — `config.py` uses `extra="ignore"` |
-| ChromaDB healthcheck shows "unhealthy" | The v1 API is deprecated in recent ChromaDB images; the service still works fine |
+---
+
+## License
+
+MIT
