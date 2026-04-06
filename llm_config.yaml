@@ -32,6 +32,15 @@ use_local_llms: true
 # (This is the whole point — accumulate data for future fine-tuning.)
 always_store_training_data: true
 
+# ─── Cloud Fallback Toggle ──────────────────────────────────────────────────
+#
+# When false, ALL cloud model fallbacks are disabled.  Steps configured with
+# call_pattern: quality_fallback will behave as "direct" (local-only), and
+# resolve_model() / resolve_primary_and_fallback() will never return a cloud
+# alias.  Set to true when you're ready to allow Anthropic API spend.
+
+enable_cloud_fallback: false
+
 # ─── Extended Thinking (Chain-of-Thought) ────────────────────────────────────
 #
 # Enables Anthropic's extended thinking on Claude models.
@@ -91,7 +100,7 @@ steps:
     description: >
       Generates a full ConceptBrief (title, hook, visual brief, physics params)
       from the selected category. Local model handles creative structured output;
-      falls back to cloud if quality gate fails.
+      falls back to cloud if quality gate fails (when enable_cloud_fallback is true).
     local_model: ollama/glm-4.7-flash:latest
     cloud_model: claude-sonnet-4-6
     litellm_alias_local: concept-developer-local
@@ -106,13 +115,13 @@ steps:
     agent: simulation_agent
     description: >
       Writes the initial Pygame+Pymunk simulation code from the ConceptBrief.
-      Complex code generation — cloud-only for reliability.
-    local_model: null                         # too complex for local 7B models
+      Complex code generation — cloud-only for reliability (when enable_cloud_fallback is true).
+    local_model: ollama/glm-4.7-flash:latest
     cloud_model: claude-sonnet-4-6
-    litellm_alias_local: null
+    litellm_alias_local: blender-coder-default
     litellm_alias_cloud: simulation-first-pass
     call_pattern: direct
-    quality_gate: "N/A — cloud only"
+    quality_gate: "N/A — direct call"
     fallback_note: "Pipeline fails if code generation fails after retries"
 
   simulation_param_adjustment:
@@ -120,7 +129,7 @@ steps:
     description: >
       Adjusts simulation parameters after a failed validation pass.
       Mechanical edits (tweak numbers, fix imports) — local model can handle this.
-      Falls back to cloud if local output fails the quality gate.
+      Falls back to cloud if quality gate fails (when enable_cloud_fallback is true).
     local_model: ollama/glm-4.7-flash:latest
     cloud_model: claude-sonnet-4-6
     litellm_alias_local: sim-param-adjust
@@ -137,13 +146,14 @@ steps:
     agent: video_editor_agent
     description: >
       Writes a ≤6-word hook caption for the first 0-2 seconds of the video.
-      Highest-leverage text for viewer retention — cloud for quality.
-    local_model: null                         # hook quality is critical — cloud only
+      Highest-leverage text for viewer retention — cloud for quality
+      (when enable_cloud_fallback is true).
+    local_model: ollama/glm-4.7-flash:latest
     cloud_model: claude-sonnet-4-6
-    litellm_alias_local: null
+    litellm_alias_local: idea-agent-local
     litellm_alias_cloud: caption-writer
     call_pattern: direct
-    quality_gate: "N/A — cloud only"
+    quality_gate: "N/A — direct call"
     fallback_note: "Falls back to concept.hook_text if LLM call fails"
 
   title_writer:

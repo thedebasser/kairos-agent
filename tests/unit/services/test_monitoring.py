@@ -139,6 +139,18 @@ class TestMetricsStore:
 
 # ── AlertManager ──────────────────────────────────────────────────────
 
+@pytest.fixture(autouse=False)
+def _mock_alert_settings():
+    """Prevent AlertManager from sending real Discord/Slack webhooks during tests."""
+    settings = MagicMock()
+    settings.cost_alert_threshold_usd = 0.30
+    settings.discord_webhook_url = ""
+    settings.slack_webhook_url = ""
+    with patch("kairos.ai.tracing.sinks.langfuse_sink.get_settings", return_value=settings):
+        yield settings
+
+
+@pytest.mark.usefixtures("_mock_alert_settings")
 class TestAlertManager:
     def test_no_alerts_when_healthy(self):
         store = MetricsStore()

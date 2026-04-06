@@ -30,6 +30,15 @@ from kairos.calibration.sandbox import (
 from kairos.calibration.models import FailureMode
 
 
+def _make_smoke_crash() -> dict[str, Any]:
+    """Simulate a smoke test that crashes with no JSON output."""
+    return {
+        "returncode": 1,
+        "stdout": "",
+        "stderr": "Traceback: RuntimeError: rigid body world missing",
+        "json_output": None,
+    }
+
 pytestmark = pytest.mark.unit
 
 
@@ -406,3 +415,96 @@ class TestRunCalibration:
 
         # Should still resolve on the second attempt
         assert session.status in (CalibrationStatus.RESOLVED, CalibrationStatus.PROMOTED)
+
+    @pytest.mark.asyncio
+    async def test_script_crash_breaks_immediately(
+        self,
+        straight_30: ScenarioDescriptor,
+        tmp_path: Path,
+    ) -> None:
+        """When smoke test produces no JSON, session breaks immediately as SCRIPT_CRASH."""
+        blender_responses = [
+            _make_generation_success(),
+            _make_smoke_crash(),
+        ]
+
+        with (
+            patch("kairos.calibration.sandbox.run_blender_script",
+                  side_effect=blender_responses),
+            patch("kairos.calibration.sandbox._calibration_base_dir",
+                  return_value=tmp_path),
+            patch("kairos.calibration.sandbox._detect_blender_version",
+                  return_value="Blender 5.0.0"),
+        ):
+            session = await run_calibration(
+                straight_30,
+                knowledge_base=None,
+                max_iterations=10,
+                dry_run=True,
+            )
+
+        assert session.status == CalibrationStatus.UNRESOLVED
+        # Must stop after 1 iteration — no pointless retries
+        assert session.iteration_count == 1
+        last = session.iterations[0]
+        assert last.failure_modes == [FailureMode.SCRIPT_CRASH]
+        assert "crashed" in last.failure_details.lower()
+
+    @pytest.mark.asyncio
+    async def test_stuck_loop_escalates_at_5(
+        self,
+        straight_30: ScenarioDescriptor,
+        tmp_path: Path,
+    ) -> None:
+        """After 5 consecutive empty corrections, the stuck-loop breaker
+        escalates to broader parameter exploration."""
+        # All failures return the same result — solver_iterations already capped
+        def _make_capped_failure() -> dict[str, Any]:
+            return {
+                "returncode": 0,
+                "stdout": "",
+                "stderr": "",
+                "json_output": {
+                    "passed": False,
+                    "checks": [{"name": "generic_fail", "passed": False}],
+                    "completion_ratio": 0.0,
+                },
+            }
+
+        # Starting from baseline (solver=20, substeps=20), UNKNOWN bumps both
+        # by +5 per iter.  substeps caps at 30 (iter 3), solver caps at 60
+        # (iter 9).  First empty correction at iter 9; 5th consecutive empty
+        # at iter 13.  Need 14 iters to see the escalation applied.
+        blender_responses = [
+            val for _ in range(14)
+            for val in (_make_generation_success(), _make_capped_failure())
+        ]
+
+        with (
+            patch("kairos.calibration.sandbox.run_blender_script",
+                  side_effect=blender_responses),
+            patch("kairos.calibration.sandbox._calibration_base_dir",
+                  return_value=tmp_path),
+            patch("kairos.calibration.sandbox._detect_blender_version",
+                  return_value="Blender 5.0.0"),
+        ):
+            session = await run_calibration(
+                straight_30,
+                knowledge_base=None,
+                max_iterations=14,
+                dry_run=True,
+            )
+
+        assert session.status == CalibrationStatus.UNRESOLVED
+        # The stuck-loop breaker escalates at the 5th consecutive empty
+        # correction with broader params (spacing, impulse, friction, mass).
+        found_escalation = False
+        for it in session.iterations:
+            delta = it.correction_applied or {}
+            if "spacing_ratio" in delta or "trigger_impulse" in delta:
+                found_escalation = True
+                break
+        assert found_escalation, (
+            "Stuck-loop breaker should have escalated with broader parameters "
+            "but no spacing_ratio/trigger_impulse corrections were found"
+        )

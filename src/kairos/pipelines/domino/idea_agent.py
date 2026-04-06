@@ -238,12 +238,13 @@ class DominoIdeaAgent(IdeaAgent):
 
                 if calibrated:
                     # Apply calibrated physics on top of locked overrides
-                    for key, val in calibrated.items():
+                    applied = calibrated.apply_to_baseline()
+                    for key, val in applied.items():
                         if key in overrides:
                             overrides[key] = val
                     logger.info(
                         "[domino_idea] Calibration applied: %s",
-                        {k: calibrated[k] for k in calibrated if k in overrides},
+                        {k: applied[k] for k in applied if k in overrides},
                     )
                 else:
                     logger.info("[domino_idea] No calibration match — using locked defaults")

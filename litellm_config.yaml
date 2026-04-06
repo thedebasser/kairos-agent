@@ -103,6 +103,9 @@ model_list:
 
 router_settings:
   # Fallback: local param adjust → cloud simulation debugger
+  # NOTE: Application-level gating via enable_cloud_fallback in llm_config.yaml
+  # prevents cloud calls even if this is configured.  The LiteLLM router only
+  # fires if the application actually routes to a cloud alias.
   fallbacks:
     - sim-param-adjust: ["simulation-first-pass"]
   num_retries: 2

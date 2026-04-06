@@ -40,14 +40,14 @@ def _caption_writer_model() -> str:
     try:
         return get_step_config("caption_writer").resolve_model()
     except Exception:
-        return "anthropic/claude-sonnet-4-20250514"
+        return "idea-agent-local"
 
 
 def _title_writer_model() -> str:
     try:
         return get_step_config("title_writer").resolve_model()
     except Exception:
-        return "anthropic/claude-sonnet-4-20250514"
+        return "title-writer"
 
 
 class DominoVideoEditorAgent(VideoEditorAgent):

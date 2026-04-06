@@ -36,9 +36,10 @@ _CONFIG_PATH = Path(__file__).resolve().parents[4] / "llm_config.yaml"
 class StepConfig:
     """Resolved model configuration for a single pipeline step."""
 
-    def __init__(self, raw: dict[str, Any], use_local: bool) -> None:
+    def __init__(self, raw: dict[str, Any], use_local: bool, cloud_fallback: bool = True) -> None:
         self._raw = raw
         self._use_local = use_local
+        self._cloud_fallback = cloud_fallback
 
     # Aliases -----------------------------------------------------------------
 
@@ -52,7 +53,11 @@ class StepConfig:
 
     @property
     def call_pattern(self) -> str:
-        return self._raw.get("call_pattern", "direct")
+        pattern = self._raw.get("call_pattern", "direct")
+        # When cloud fallback is disabled, downgrade quality_fallback → direct
+        if pattern == "quality_fallback" and not self._cloud_fallback:
+            return "direct"
+        return pattern
 
     @property
     def local_model(self) -> str | None:
@@ -72,33 +77,50 @@ class StepConfig:
     def resolve_model(self) -> str:
         """Return the single model alias to use for a *direct* call.
 
-        When ``use_local_llms`` is true and the step has a local model
-        configured, returns the local alias; otherwise returns cloud.
+        Resolution order:
+        1. litellm_alias_local (when use_local_llms is true)
+        2. litellm_alias_cloud (when cloud fallback is on)
+        3. litellm_alias_local (last resort, regardless of use_local toggle)
+        4. local_model raw value (e.g. ``ollama/glm-4.7-flash:latest``)
         """
         if self.should_try_local:
             return self.litellm_alias_local  # type: ignore[return-value]
-        if self.litellm_alias_cloud:
+        if self.litellm_alias_cloud and self._cloud_fallback:
             return self.litellm_alias_cloud
-        # Last resort — should never happen if config is valid
+        # Cloud disabled or not configured — try local alias as last resort
+        if self.litellm_alias_local:
+            return self.litellm_alias_local
+        # No litellm alias at all — fall back to the raw local_model identifier
+        if self.local_model:
+            return self.local_model
         raise ValueError(
-            f"No model configured for step: {self._raw}"
+            f"No model configured for step (cloud fallback={'on' if self._cloud_fallback else 'off'}): {self._raw}"
         )
 
     def resolve_primary_and_fallback(self) -> tuple[str, str]:
         """Return ``(primary, fallback)`` for a quality-fallback call.
 
-        * local enabled  → (local_alias, cloud_alias)
-        * local disabled → (cloud_alias, cloud_alias)  — effectively
-          a direct cloud call but still goes through the fallback path
-          so training data is recorded.
+        * cloud fallback off → (local_alias, local_alias) — no cloud
+        * local enabled      → (local_alias, cloud_alias)
+        * local disabled     → (cloud_alias, cloud_alias)
         """
+        local = self.litellm_alias_local
         cloud = self.litellm_alias_cloud
+
+        if not self._cloud_fallback:
+            # Cloud disabled — both primary and fallback use local
+            if local is None:
+                raise ValueError(
+                    f"Cloud fallback is off but no local model configured: {self._raw}"
+                )
+            return (local, local)
+
         if cloud is None:
             raise ValueError(
                 f"quality_fallback step has no cloud model: {self._raw}"
             )
         if self.should_try_local:
-            return (self.litellm_alias_local, cloud)  # type: ignore[return-value]
+            return (local, cloud)  # type: ignore[return-value]
         return (cloud, cloud)
 
 
@@ -134,6 +156,16 @@ def use_local_llms() -> bool:
     return bool(cfg.get("use_local_llms", False))
 
 
+def enable_cloud_fallback() -> bool:
+    """Whether cloud model fallbacks are allowed.
+
+    When ``False``, quality_fallback steps behave as direct (local-only)
+    and ``resolve_model()`` never returns a cloud alias.
+    """
+    cfg = _load_raw_config()
+    return bool(cfg.get("enable_cloud_fallback", True))
+
+
 def always_store_training_data() -> bool:
     """Whether to persist training data even when local is disabled."""
     cfg = _load_raw_config()
@@ -157,7 +189,7 @@ def get_step_config(step_name: str) -> StepConfig:
             f"Step '{step_name}' not found in llm_config.yaml. "
             f"Available steps: {list(steps.keys())}"
         )
-    return StepConfig(steps[step_name], use_local=use_local_llms())
+    return StepConfig(steps[step_name], use_local=use_local_llms(), cloud_fallback=enable_cloud_fallback())
 
 
 def get_ollama_base_url() -> str:

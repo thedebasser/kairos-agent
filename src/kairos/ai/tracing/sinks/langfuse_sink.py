@@ -843,6 +843,7 @@ class AlertManager:
         """
         webhook_url = self._settings.discord_webhook_url
         if not webhook_url:
+            logger.debug("Discord webhook URL not configured — skipping pipeline alert (%s)", alert.alert_type)
             return
 
         try:

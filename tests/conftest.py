@@ -31,6 +31,27 @@ from kairos.services.category_rotation import CategoryInfo
 
 
 # =============================================================================
+# Global autouse fixture — clear LRU caches between tests
+# =============================================================================
+
+
+@pytest.fixture(autouse=True)
+def _clear_llm_config_cache():
+    """Clear LLM config LRU cache and response cache between tests.
+
+    Prevents stale cached config or step results from leaking between tests.
+    """
+    from kairos.ai.llm import cache as _cache_mod
+    from kairos.ai.llm.config import _load_raw_config
+
+    _load_raw_config.cache_clear()
+    _cache_mod._current_cache = None
+    yield
+    _load_raw_config.cache_clear()
+    _cache_mod._current_cache = None
+
+
+# =============================================================================
 # Pipeline State Fixtures
 # =============================================================================
 
