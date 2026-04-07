@@ -1,7 +1,7 @@
 """Physics Pipeline Adapter.
 
 Implements PipelineAdapter for "Oddly Satisfying Physics" simulations.
-Uses Pygame 2.6 + Pymunk 6.8 as the simulation engine.
+Uses Blender 3D as the simulation engine (config-based pipeline).
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ class PhysicsPipelineAdapter(PipelineAdapter):
     """Pipeline adapter for physics simulations.
 
     Pipeline 1 from the implementation document — "Oddly Satisfying Physics".
-    Engine: Pygame 2.6 + Pymunk 6.8
+    Engine: Blender 3D (config-based pipeline)
     Categories: ball_pit, marble_funnel, domino_chain, destruction
     """
 
@@ -35,7 +35,7 @@ class PhysicsPipelineAdapter(PipelineAdapter):
 
     @property
     def engine_name(self) -> str:
-        return "pygame_pymunk"
+        return "blender"
 
     @property
     def categories(self) -> list[str]:

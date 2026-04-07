@@ -13,8 +13,8 @@ class TestSimulationCode:
     """Tests for SimulationCode model."""
 
     def test_creates_with_code(self) -> None:
-        sc = SimulationCode(code="import pygame", reasoning="test")
-        assert sc.code == "import pygame"
+        sc = SimulationCode(code="import bpy", reasoning="test")
+        assert sc.code == "import bpy"
         assert sc.reasoning == "test"
 
     def test_is_frozen(self) -> None:

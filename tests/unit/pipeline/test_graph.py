@@ -339,7 +339,7 @@ class TestSimulationNode:
         updated_state = PipelineState(
             pipeline="physics",
             status=PipelineStatus.EDITING_PHASE,
-            simulation_code="import pygame; ...",
+            simulation_code='{"scene": "domino_course"}',
             raw_video_path="/tmp/output.mp4",
             simulation_iteration=2,
             simulation_result=SimulationResult(

@@ -5,10 +5,10 @@
 
 ## Context
 
-The system needs to support multiple simulation engines (Pygame+Pymunk for physics, Blender for domino/marble, potentially more in the future). Each engine has different:
+The system needs to support multiple simulation pipelines (physics, domino, marble, potentially more in the future). All pipelines use Blender as the simulation engine but have different:
 - Agent implementations (different prompts, different config schemas)
 - Execution environments (Docker sandbox vs Blender subprocess)
-- Output characteristics (headless Pygame vs Blender render)
+- Output characteristics (render settings, camera angles, post-processing)
 - Category support (ball_pit/destruction vs domino_chain vs marble_funnel)
 
 We needed a way to add new pipelines without modifying the orchestrator or shared services.
@@ -25,7 +25,7 @@ Implement a **pipeline adapter pattern** with:
 @register_pipeline("physics")
 class PhysicsPipelineAdapter(PipelineAdapter):
     pipeline_name = "physics"
-    engine_name = "pymunk"
+    engine_name = "blender"
     categories = [ScenarioCategory.BALL_PIT, ScenarioCategory.DESTRUCTION]
 
     def get_idea_agent(self) -> IdeaAgent:
@@ -58,6 +58,6 @@ agent = adapter.get_idea_agent()           # → PhysicsIdeaAgent
 **Current pipelines:**
 | Pipeline | Engine | Status |
 |----------|--------|--------|
-| physics | Pygame+Pymunk | Active, primary |
+| physics | Blender | Active, primary |
 | domino | Blender | Active |
 | marble | Blender | Under redesign |

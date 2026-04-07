@@ -46,7 +46,7 @@ The same three-agent architecture runs across every pipeline. What changes betwe
 
 ### POC Scope
 
-The POC targets **Pipeline 1: Oddly Satisfying Physics** using Pygame + Pymunk. It is limited to four scenario categories: ball pit / collision cascade, marble funnel / sorting, domino chains, and destruction / stacking. The goal is a working end-to-end pipeline that produces validated, reviewable, publishable 9:16 short-form videos.
+The POC targets **Pipeline 1: Oddly Satisfying Physics** using Blender's rigid body physics engine. It is limited to four scenario categories: ball pit / collision cascade, marble funnel / sorting, domino chains, and destruction / stacking. The goal is a working end-to-end pipeline that produces validated, reviewable, publishable 9:16 short-form videos.
 
 ---
 
@@ -245,7 +245,7 @@ Loops until all validation checks pass or max iterations (5) reached. On max ite
 | `execute_simulation` | Run in Docker sandbox, return stdout/stderr and basic stats |
 | `extract_frame_sequence` | Generate contact sheet of frames for visual inspection |
 | `get_simulation_stats` | Duration, peak body count, avg FPS, payoff timestamp |
-| `adjust_parameters` | Targeted parameter edits without full rewrite |
+| `calibrate_parameters` | Calibration-informed parameter adjustment via ChromaDB |
 | `validate_output` | Run all programmatic validation checks |
 | `render_final` | Full-quality render to MP4 |
 
@@ -274,7 +274,7 @@ Tier 2 — AI-assisted (optional, supplements Tier 1):
 
 **Ingestion tool: LlamaIndex.** Rather than building a custom document ingestion pipeline, use LlamaIndex's `IngestionPipeline` for all RAG data loading. LlamaIndex handles document loading (web pages, markdown, code files), code-aware chunking, embedding generation, deduplication, and incremental updates. It feeds directly into ChromaDB (our vector store). This means:
 
-- Pymunk/Pygame API docs are ingested via `WebBaseLoader` or `SimpleDirectoryReader`
+- Blender Python API docs are ingested via `WebBaseLoader` or `SimpleDirectoryReader`
 - Code patterns and scenario templates are ingested with language-aware splitting (preserves function boundaries)
 - Approved simulations are auto-ingested after human review — the pipeline grows its own knowledge base over time
 - LlamaIndex's deduplication ensures re-ingesting updated docs only processes changes
@@ -514,7 +514,7 @@ The Simulation Agent generates and executes arbitrary Python code. This is a sec
 ```
 Host machine
 └── Docker: simulation-sandbox
-    ├── Base image: python:3.12-slim + pygame + pymunk
+    ├── Base image: Blender 4.x with Python 3.12 (custom image)
     ├── Mounted volume: /workspace (read-write, simulation code + output)
     ├── No network access (--network=none)
     ├── Resource limits:
@@ -522,17 +522,15 @@ Host machine
     │   ├── CPU: 2 cores (--cpus=2)
     │   └── Timeout: 300s (5 min max execution)
     ├── Read-only filesystem except /workspace
-    └── No GPU passthrough needed (Pygame renders on CPU)
+    └── GPU passthrough recommended for Blender EEVEE/Cycles rendering
 ```
 
 ### Sandbox Dockerfile
 
 ```dockerfile
-FROM python:3.12-slim
+FROM nytimes/blender:4.0-gpu-ubuntu18.04
 
 RUN pip install --no-cache-dir \
-    pygame==2.6.1 \
-    pymunk==6.8.1 \
     numpy==1.26.4 \
     Pillow==10.4.0
 
@@ -578,8 +576,8 @@ def execute_simulation(code: str, timeout: int = 300) -> SimulationResult:
 
 ### Why 4GB Memory Limit
 
-- Pymunk simulations with 500+ rigid bodies typically use 200–800MB
-- Pygame surface rendering for 1080×1920 at 60fps uses ~100MB
+- Blender rigid body simulations with 500+ objects typically use 500MB–2GB
+- Blender EEVEE rendering for 1080×1920 uses ~500MB–1GB VRAM
 - MP4 encoding buffer adds ~500MB
 - 4GB provides comfortable headroom without risking the host machine (which needs VRAM and system RAM for Ollama and other services)
 - If a simulation leaks memory or enters an infinite spawn loop, the OOM killer terminates the container cleanly
@@ -1030,8 +1028,7 @@ CREATE INDEX idx_training_approved ON training_examples(pipeline, human_approved
 |---|---|---|
 | Orchestration | LangGraph (pinned version) | Agent logic as plain Python functions, loosely coupled |
 | Structured LLM output | Instructor | Pydantic-validated JSON from all LLM calls |
-| Physics (2D) | Pygame 2.6 + Pymunk 6.8 | POC engine |
-| Physics (3D, planned) | Blender Python API | Future pipeline |
+| Physics (3D) | Blender Python API (bpy) | Primary engine |
 | Vehicle sim (planned) | BeamNG.tech + BeamNGpy | Future pipeline, requires license |
 | Orbital sim (planned) | Custom n-body (numpy) | Future pipeline |
 | Video assembly | FFmpeg | Industry standard |
@@ -1119,7 +1116,7 @@ tests/
 │   │   │       ├── wrong_resolution.mp4
 │   │   │       └── frozen_frames.mp4
 │   │   ├── test_physics_pipeline.py      # Physics-specific tests
-│   │   ├── test_pymunk_patterns.py       # Pymunk code generation patterns
+│   │   ├── test_blender_patterns.py       # Blender script generation patterns
 │   │   └── test_scenario_categories.py   # Each category produces runnable code
 │   └── (future pipelines add directories here)
 │
@@ -1307,7 +1304,7 @@ Rejected simulations are also stored (with `human_approved = false`) — negativ
 
 ### Why It Works
 
-The domain is extremely narrow (Pymunk uses a small, consistent API subset), output is objectively verifiable (runs or doesn't, passes validation or doesn't), base models are already strong at Python, and the frontier model becomes teacher/validator rather than workhorse. Each pipeline's fine-tuned model covers only its own engine — small, specialised, fast.
+The domain is extremely narrow (Blender's rigid body API uses a small, consistent bpy subset), output is objectively verifiable (runs or doesn't, passes validation or doesn't), base models are already strong at Python, and the frontier model becomes teacher/validator rather than workhorse. Each pipeline's fine-tuned model covers only its own engine — small, specialised, fast.
 
 ---
 
@@ -1317,7 +1314,7 @@ All future pipelines use the same three-agent architecture with a new simulation
 
 ### Pipeline 1: Oddly Satisfying Physics (POC — Active)
 
-**Engine:** Pygame + Pymunk (2D rigid body physics)
+**Engine:** Blender Python API (3D rigid body physics)
 **Categories:** Ball pit, marble funnel, domino chains, destruction/stacking
 **Content type:** Ball physics, collisions, sorting, destruction
 
@@ -1329,13 +1326,13 @@ All future pipelines use the same three-agent architecture with a new simulation
 
 ### Pipeline 3: Marble Races (Planned)
 
-**Engine:** Pygame + Pymunk (shares engine with Pipeline 1)
+**Engine:** Blender Python API (shares engine with Pipeline 1)
 **Content type:** Single races, multi-round brackets, surface variants
 **Note:** Likely a scenario category extension of Pipeline 1 rather than a full separate pipeline.
 
 ### Pipeline 4: Space & Orbital Simulations (Planned)
 
-**Engine:** Custom n-body (numpy + matplotlib or Pygame renderer)
+**Engine:** Custom n-body (numpy + Blender renderer)
 **Content type:** Planet collisions, rogue bodies, orbital decay, galaxy formation
 
 ### Pipeline 5: 3D Physics & Destruction (Planned)
@@ -1499,7 +1496,7 @@ Steps are ordered by dependency. Each step produces a testable deliverable. No s
 
 **Step 4 — Simulation Sandbox**
 
-- Build sandbox Docker image with Pygame + Pymunk
+- Build sandbox Docker image with Blender (headless)
 - Implement `execute_simulation()` function with resource limits
 - Test: known-good script executes and returns output
 - Test: known-bad script (infinite loop, OOM) terminates cleanly
@@ -1519,7 +1516,7 @@ Steps are ordered by dependency. Each step produces a testable deliverable. No s
 
 **6a — Prompt Development Harness (prerequisite)**
 
-Before wiring the Simulation Agent into LangGraph, build a standalone harness for iterating on prompts manually. This is a critical de-risking step — the entire pipeline depends on LLMs generating working Pymunk code, and that assumption must be validated before building automation around it.
+Before wiring the Simulation Agent into LangGraph, build a standalone harness for iterating on prompts manually. This is a critical de-risking step — the entire pipeline depends on LLMs generating working Blender Python scripts, and that assumption must be validated before building automation around it.
 
 The harness is a CLI tool that:
 
@@ -1541,15 +1538,15 @@ The harness produces three outputs:
 **6b — Initial Base Prompt (simulation first pass)**
 
 ```
-You are a physics simulation developer. You write Python code using Pygame and Pymunk to create visually satisfying 2D physics simulations that render to MP4 video.
+You are a physics simulation developer. You write Blender Python scripts to create visually satisfying 3D physics simulations that render to MP4 video.
 
 ## Requirements
-- Use Pygame 2.6 + Pymunk 6.8
-- Render at 1080x1920 (9:16 portrait) at 60 FPS
+- Use Blender 4.x Python API (bpy)
+- Render at 1080x1920 (9:16 portrait) at 30 FPS
 - Target duration: 65 seconds
-- Run headless (no SDL display) — render frames to a surface, save as MP4
+- Run headless (blender --background) — render frames to PNG sequence, encode as MP4
 - Output file: /workspace/output/simulation.mp4
-- Use pygame.image.save() for frames, then FFmpeg to encode MP4
+- Use Blender's render API for frames, then FFmpeg to encode MP4
 - All physics bodies must be visible and use distinct colours
 
 ## Concept
@@ -1573,7 +1570,7 @@ Return ONLY the complete Python file. No explanations, no markdown. The code mus
 - Implement Simulation Agent as a plain Python class with methods for: code generation (Claude), parameter adjustment (Mistral), frame extraction, validation orchestration
 - Implement iteration loop: generate → execute in sandbox → validate → adjust → repeat
 - Implement escalation logic (max iterations → back to Idea Agent)
-- Build RAG knowledge base using **LlamaIndex IngestionPipeline**: auto-ingest Pymunk/Pygame docs via web loader, seed initial code patterns and scenario templates, configure auto-ingestion of approved simulations after human review
+- Build RAG knowledge base using **LlamaIndex IngestionPipeline**: auto-ingest Blender Python API docs via web loader, seed initial code patterns and scenario templates, configure auto-ingestion of approved simulations after human review
 - Wire up ChromaDB for `query_knowledge` tool (LlamaIndex feeds ChromaDB at ingestion time; runtime queries go direct to ChromaDB)
 - **Implement cloud fallback learning loop:** when local LLM fails and cloud succeeds, automatically store the successful output in RAG under `cloud_learnings/` (see Section 4, RAG Learning Loop)
 - Write unit tests for iteration logic, escalation, parameter adjustment parsing

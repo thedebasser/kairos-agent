@@ -461,86 +461,6 @@ class DominoSimulationAgent(SimulationAgent):
         return validation
 
     # ------------------------------------------------------------------
-    # ABC: adjust_parameters
-    # ------------------------------------------------------------------
-
-    async def adjust_parameters(
-        self,
-        code: str,
-        validation_result: ValidationResult,
-        iteration: int,
-    ) -> str:
-        """Adjust config and regenerate course on validation failure."""
-        blend_path = Path(code)
-        work_dir = blend_path.parent
-        config_path = work_dir / "config.json"
-
-        if config_path.exists():
-            config = json.loads(config_path.read_text(encoding="utf-8"))
-        else:
-            config = {}
-
-        # Increase physics fidelity on failure
-        config["substeps_per_frame"] = min(
-            30, config.get("substeps_per_frame", 20) + 5
-        )
-        config["solver_iterations"] = min(
-            60, config.get("solver_iterations", 20) + 10
-        )
-        # Increase trigger impulse if chain didn't propagate
-        config["trigger_impulse"] = min(
-            8.0, config.get("trigger_impulse", 3.0) + 1.0
-        )
-        # Tighten spacing for better chain propagation on curves
-        config["spacing_ratio"] = max(
-            0.25, config.get("spacing_ratio", 0.35) - 0.03
-        )
-        # Reduce domino count slightly for stability
-        if config.get("domino_count", 150) > 80:
-            config["domino_count"] = max(80, config["domino_count"] - 30)
-
-        config_path.write_text(
-            json.dumps(config, indent=2),
-            encoding="utf-8",
-        )
-
-        logger.info(
-            "[domino_sim] Adjusted config (iter %d): substeps=%d, solver=%d, impulse=%.1f, count=%d",
-            iteration,
-            config.get("substeps_per_frame"),
-            config.get("solver_iterations"),
-            config.get("trigger_impulse"),
-            config.get("domino_count"),
-        )
-
-        # Invalidate cached validation for this run
-        cache = get_cache()
-        if cache:
-            # Clear step caches for generate and validate so they re-run
-            for step in ("domino_generate", "domino_validate", "domino_render"):
-                step_path = cache.step_cache_dir / f"step_{step}.json"
-                if step_path.exists():
-                    step_path.unlink()
-                    logger.info("[domino_sim] Cleared cache for %s", step)
-
-        new_blend = work_dir / f"domino_course_v{iteration}.blend"
-        result = await run_blender_script(
-            "generate_domino_course.py",
-            script_args=[
-                "--config", str(config_path),
-                "--output-blend", str(new_blend),
-            ],
-            timeout_sec=300,
-        )
-
-        if result["returncode"] != 0:
-            raise SimulationExecutionError(
-                f"Re-generation failed on iteration {iteration}"
-            )
-
-        return str(new_blend)
-
-    # ------------------------------------------------------------------
     # ABC: get_simulation_stats
     # ------------------------------------------------------------------
 
@@ -605,32 +525,27 @@ class DominoSimulationAgent(SimulationAgent):
             result.simulation_iteration = iteration
             logger.info("[domino_sim] === Iteration %d/%d ===", iteration, MAX_ITERATIONS)
 
-            # Step 1: Generate course
+            # Step 1: Generate course (calibration drives first-pass quality)
             t0 = time.monotonic()
-            if iteration == 1:
-                blend_path = await self.generate_simulation(concept)
-                _dur = int((time.monotonic() - t0) * 1000)
-                tracer.action(
-                    "blender:generate_course",
-                    input_summary=f"archetype={concept.visual_brief[:60] if concept and concept.visual_brief else 'default'}, iter={iteration}",
-                    output_summary=f"{Path(blend_path).name}",
-                    status="success",
-                    duration_ms=_dur,
-                )
-            else:
-                blend_path = await self.adjust_parameters(
-                    blend_path,
-                    result.validation_result,  # type: ignore[arg-type]
-                    iteration,
-                )
-                _dur = int((time.monotonic() - t0) * 1000)
-                tracer.action(
-                    "blender:regenerate_course",
-                    input_summary=f"iter={iteration}, adjusting physics params",
-                    output_summary=f"{Path(blend_path).name}",
-                    status="success",
-                    duration_ms=_dur,
-                )
+            if iteration > 1:
+                # Invalidate caches so generate_simulation runs fresh
+                cache_inner = get_cache()
+                if cache_inner:
+                    for step in ("domino_generate", "domino_validate", "domino_render"):
+                        sp = cache_inner.step_cache_dir / f"step_{step}.json"
+                        if sp.exists():
+                            sp.unlink()
+                            logger.info("[domino_sim] Cleared cache for %s", step)
+
+            blend_path = await self.generate_simulation(concept)
+            _dur = int((time.monotonic() - t0) * 1000)
+            tracer.action(
+                "blender:generate_course",
+                input_summary=f"archetype={concept.visual_brief[:60] if concept and concept.visual_brief else 'default'}, iter={iteration}",
+                output_summary=f"{Path(blend_path).name}",
+                status="success",
+                duration_ms=_dur,
+            )
 
             result.simulation_code = blend_path
 

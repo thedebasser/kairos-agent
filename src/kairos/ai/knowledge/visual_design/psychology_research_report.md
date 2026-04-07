@@ -157,7 +157,7 @@ Professor Craig Richard (ASMR University) observed that the ticklish, spine-ting
 
 Every collision must have a matching audio cue, precisely synchronised to the frame of visual contact. The tolerance for asynchrony is extremely tight — research on the "temporal binding window" for audio-visual integration shows that sounds arriving more than ~150ms before or ~250ms after the visual event are perceived as separate events, breaking the multisensory binding that makes impacts feel real.
 
-**Implementation for Kairos:** The collision detection system in Pymunk already tracks contact points and forces. Each collision event should log its frame number and impact force magnitude. In post-processing, sound effects are mapped to these events with frame-accurate synchronisation.
+**Implementation for Kairos:** The collision detection system in Blender's rigid body engine already tracks contact points and forces. Each collision event should log its frame number and impact force magnitude. In post-processing, sound effects are mapped to these events with frame-accurate synchronisation.
 
 #### 2. Material Differentiation
 

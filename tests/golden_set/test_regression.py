@@ -58,7 +58,7 @@ class TestStubValidation:
             "category": "gravity_chaos",
             "title": "Test",
             "visual_brief": "A test concept",
-            "simulation_requirements": {"engine": "pymunk"},
+            "simulation_requirements": {"engine": "blender"},
             "audio_brief": {"mood": "calm"},
             "hook_text": "Test Hook",
             "novelty_score": 7.0,

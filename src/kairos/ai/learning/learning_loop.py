@@ -418,28 +418,27 @@ def get_validation_rules_prompt() -> str:
     validation checks AND LLM prompt instructions, so the LLM avoids
     mistakes instead of making them and getting caught.
     """
-    return """### CRITICAL RULES (from 558+ past failure analysis)
+    return """### CRITICAL RULES (from past failure analysis)
 
-These rules are enforced by automated static validation.  Violations
+These rules are enforced by automated validation.  Violations
 will be caught and your code will be rejected.  Follow them exactly.
 
-**Coordinate System:**
-- ALWAYS set `space.gravity = (0, 900)` for Y-down convention
-- ALWAYS include `positive_y_is_up = False` when using Pymunk
-- Origin (0, 0) is TOP-LEFT; Y increases downward
+**Scene Setup:**
+- ALWAYS configure gravity to (0, 0, -9.81) in Blender scene
+- ALWAYS use Blender's rigid body physics for all dynamic objects
+- Origin is world centre; Z is up
 
 **Rendering:**
-- NEVER use `pygame.display.set_mode()` — use `pygame.Surface((WIDTH, HEIGHT))` for headless rendering
-- NEVER call `pygame.display.flip()` or `pygame.display.update()` — not needed headless
-- ALWAYS set `os.environ["SDL_VIDEODRIVER"] = "dummy"` before pygame.init()
+- ALWAYS use headless Blender rendering (no GUI)
+- ALWAYS set render output format to FFMPEG / MP4
+- ALWAYS configure output resolution to 1080x1920 (vertical short-form)
 
 **Physics:**
-- ALWAYS call `space.step(1/60)` in the render loop — physics must advance
-- ALWAYS use `pymunk.moment_for_circle()` / `pymunk.moment_for_box()` — NEVER hardcode moment values
-- ALWAYS call `pygame.init()` before creating surfaces
+- ALWAYS bake rigid body simulation before rendering
+- ALWAYS set substeps_per_frame ≥ 10 for stable physics
+- ALWAYS set solver_iterations ≥ 20 for accurate collisions
 
 **Video Output:**
-- ALWAYS pipe frames to FFmpeg via `subprocess.Popen`
-- ALWAYS output to `/workspace/output/simulation.mp4`
+- ALWAYS output to the designated run output directory
 - ALWAYS print `PAYOFF_TIMESTAMP=<seconds>` and `PEAK_BODY_COUNT=<count>` to stdout
 """

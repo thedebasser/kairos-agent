@@ -38,7 +38,7 @@ Kairos Agent is structured as a layered architecture with strict dependency rule
 │   prompts, learning)      │   audio, captions)         │
 ├───────────────────────────┼────────────────────────────┤
 │  Engine Layer             │  Data Layer                │  ← Execution & storage
-│  (Pymunk sandbox,         │  (PostgreSQL, SQLAlchemy,  │
+│  (Blender sandbox,          │  (PostgreSQL, SQLAlchemy,  │
 │   Blender subprocess)     │   Alembic)                 │
 └───────────────────────────┴────────────────────────────┘
 ```
@@ -170,7 +170,7 @@ Adapters are registered via `@register_pipeline("physics")` decorator. The regis
 @register_pipeline("physics")
 class PhysicsPipelineAdapter(PipelineAdapter):
     pipeline_name = "physics"
-    engine_name = "pymunk"
+    engine_name = "blender"
     ...
 ```
 
@@ -180,7 +180,7 @@ class PhysicsPipelineAdapter(PipelineAdapter):
 
 | Pipeline | Engine | Status | Categories |
 |----------|--------|--------|------------|
-| `physics` | Pygame + Pymunk | Active (primary) | BALL_PIT, DESTRUCTION |
+| `physics` | Blender | Active (primary) | BALL_PIT, DESTRUCTION |
 | `domino` | Blender 3D | Active | DOMINO_CHAIN |
 | `marble` | Blender 3D | Under redesign | MARBLE_FUNNEL |
 
@@ -207,7 +207,7 @@ Three sub-agents collaborating:
 **Config-based template architecture** — the key architectural choice that reduces hallucination:
 
 1. LLM generates a **JSON config** matching a per-category schema (e.g., `BallPitConfig`, `DestructionConfig`)
-2. A fixed Python template per category renders the config into runnable Pygame+Pymunk code
+2. A fixed Python template per category renders the config into runnable Blender Python scripts
 3. Headless pre-validation checks chain completion before render
 4. On failure, the LLM adjusts the **config** (not the code) — a much smaller, constrained search space
 
@@ -367,9 +367,9 @@ All Tier 1 checks must pass before Tier 2 runs. Results are returned as a `Valid
 
 **Location:** `src/kairos/engines/`
 
-### Pymunk Sandbox (`engines/pymunk/`)
+### Blender Sandbox (`engines/blender/`)
 
-Agent-generated Pygame+Pymunk code executes in a Docker container with strict isolation:
+Agent-generated Blender Python scripts execute in a Docker container with strict isolation:
 
 | Constraint | Value |
 |-----------|-------|

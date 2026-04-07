@@ -40,7 +40,6 @@ graph LR
     HR -. "bad sim" .-> SA
 
     subgraph Engines
-        PM[Pygame + Pymunk]
         BL[Blender 3D]
     end
 
@@ -70,7 +69,7 @@ graph LR
 ### How a Run Works
 
 1. **Idea Agent** — Analyses category stats (SQL, no LLM), selects the next category via programmatic rotation rules, then generates a `ConceptBrief` via Claude with Instructor structured output.
-2. **Simulation Agent** — LLM generates a JSON config (not raw code). A fixed template per category renders it into runnable Pygame+Pymunk or Blender code. Executes in a Docker sandbox. Validates output. Adjusts config and retries up to 5 times.
+2. **Simulation Agent** — LLM generates a JSON config (not raw code). A fixed template per category renders it into runnable Blender Python scripts. Executes in a Docker sandbox. Validates output. Retries up to 5 times.
 3. **Video Editor Agent** — Selects music by mood tags, generates captions, assembles the final 9:16 video via FFmpeg.
 4. **Video Review** — Vision LLM extracts frames and evaluates visual quality. Routes back to Simulation Agent if it detects problems.
 5. **Audio Review** — Omni-modal LLM + FFmpeg ebur128 loudness analysis. Routes back to Video Editor if audio is poor.
@@ -88,7 +87,7 @@ src/kairos/
 ├── orchestrator/        # LangGraph graph, state, routing logic, registry
 ├── pipelines/           # Pipeline adapters + per-pipeline agents
 │   ├── adapters/        #   @register_pipeline implementations
-│   ├── physics/         #   Pygame+Pymunk agents, templates, models
+│   ├── physics/         #   Blender physics agents, templates, models
 │   ├── domino/          #   Blender domino agents + models
 │   └── marble/          #   Blender marble agents + models
 ├── ai/                  # AI layer (no business logic)
@@ -103,7 +102,7 @@ src/kairos/
 │   ├── audio/           #   SFX pool, Freesound, synthetic, mixing
 │   └── environment/     #   Blender environment theming
 ├── engines/             # Execution backends
-│   ├── pymunk/          #   Docker sandbox for Pygame+Pymunk
+│   ├── blender/         #   Blender 3D rendering engine
 │   └── blender/         #   Blender subprocess orchestrator
 ├── schemas/             # All Pydantic contracts (90+ models)
 ├── db/                  # SQLAlchemy models + async operations
@@ -222,7 +221,7 @@ Token counts and costs are tracked per-call via `_extract_usage()` and surfaced 
 | Orchestration | LangGraph 0.3 |
 | LLM routing | LiteLLM + Instructor (structured output) |
 | Models | Claude Sonnet (cloud), Mistral 7B / Llama 3.1 8B (local via Ollama) |
-| Simulation | Pygame 2.6 + Pymunk 6.8 (physics), Blender 3D (domino/marble) |
+| Simulation | Blender 4.x (all pipelines: physics, domino, marble) |
 | Video | FFmpeg (composition, validation, frame extraction) |
 | Database | PostgreSQL 16 + SQLAlchemy 2 (async) + Alembic |
 | API | FastAPI + WebSocket (live event streaming) |

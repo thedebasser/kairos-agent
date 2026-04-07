@@ -32,7 +32,7 @@ class ExtractedParameters:
         self.gravity: tuple[float, float] | None = None
         self.output_path: str = ""
         self.has_ffmpeg_pipe: bool = False
-        self.has_pygame_init: bool = False
+        self.has_engine_init: bool = False
         self.has_space_step: bool = False
         self.canvas_size: tuple[int, int] | None = None
         self.raw_assignments: dict[str, Any] = {}
@@ -50,7 +50,7 @@ class ExtractedParameters:
             or self.gravity
             or self.canvas_size
             or self.has_ffmpeg_pipe
-            or self.has_pygame_init
+            or self.has_engine_init
             or self.has_space_step
         )
         if not has_any_data:
@@ -75,8 +75,8 @@ class ExtractedParameters:
             lines.append("- FFmpeg pipe: present ✓")
         else:
             lines.append("- FFmpeg pipe: NOT FOUND ✗")
-        if not self.has_pygame_init:
-            lines.append("- pygame.init(): NOT FOUND ✗")
+        if not self.has_engine_init:
+            lines.append("- Engine init (bpy/scene setup): NOT FOUND \u2717")
         if not self.has_space_step:
             lines.append("- space.step(): NOT FOUND ✗")
         if len(lines) <= 1:
@@ -104,7 +104,7 @@ def extract_parameters(code: str) -> ExtractedParameters:
     if params.loop_iterations and params.step_size:
         params.estimated_duration_sec = params.loop_iterations * params.step_size
     elif params.loop_iterations:
-        # Default Pymunk step is 1/60
+        # Default physics step is 1/60
         params.estimated_duration_sec = params.loop_iterations / 60.0
 
     return params
@@ -119,8 +119,8 @@ class _ParameterVisitor(ast.NodeVisitor):
     def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
         func_name = self._call_name(node)
 
-        # Count pymunk.Body() calls
-        if func_name in ("pymunk.Body", "Body"):
+        # Count rigid-body creation calls
+        if func_name in ("bpy.ops.rigidbody.object_add", "rigidbody_add", "Body"):
             self.params.body_count += 1
 
         # Detect space.step() calls and extract step size
@@ -131,16 +131,16 @@ class _ParameterVisitor(ast.NodeVisitor):
                 if step_val is not None:
                     self.params.step_size = step_val
 
-        # Detect pygame.init()
-        if func_name in ("pygame.init", "pg.init"):
-            self.params.has_pygame_init = True
+        # Detect engine initialisation
+        if func_name in ("bpy.ops.wm.open_mainfile", "bpy.context.scene", "pygame.init", "pg.init"):
+            self.params.has_engine_init = True
 
         # Detect subprocess.Popen (FFmpeg pipe)
         if func_name in ("subprocess.Popen", "Popen"):
             self.params.has_ffmpeg_pipe = True
 
-        # Detect pymunk.moment_for_circle etc. as body count proxy
-        if func_name and "moment_for" in func_name:
+        # Detect rigid-body helper calls as body count proxy
+        if func_name and "rigidbody" in func_name.lower():
             self.params.body_count += 1
 
         self.generic_visit(node)
