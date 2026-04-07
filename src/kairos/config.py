@@ -150,13 +150,21 @@ class Settings(BaseSettings):
     domino_friction: float = 0.8
     domino_restitution: float = 0.1
 
+    # --- Marble Defaults ---
+    marble_radius_m: float = 0.04
+    marble_mass_kg: float = 0.028
+    marble_friction: float = 0.6
+    marble_bounce: float = 0.4
+
     # --- Pipeline Constraints ---
     content_type: str = "domino"
     max_gradient_domino_deg: float = 30.0
     max_gradient_marble_deg: float = 45.0
     min_gap_between_objects_m: float = 0.3
     scene_bounds_m: list[float] = Field(default_factory=lambda: [10.0, 10.0, 5.0])
+    scene_bounds_marble_m: list[float] = Field(default_factory=lambda: [20.0, 20.0, 10.0])
     course_length_target_m: float = 10.0
+    course_length_target_marble_m: float = 15.0
 
     # --- Calibration ---
     calibration_enabled: bool = Field(

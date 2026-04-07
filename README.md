@@ -4,13 +4,13 @@
 
 LLM-powered agents orchestrated by LangGraph collaborate to produce satisfying 9:16 portrait physics videos (ball pits, domino chains, marble funnels, destruction scenes) with no human intervention required beyond a final approve/reject gate.
 
-> **Status:** Active development. 600 tests passing. Physics and domino pipelines operational.
+> **Status:** Active development. 844 tests passing. Domino and marble run pipelines operational on Blender 3D.
 
 ---
 
 ## Why This Project Exists
 
-Most "AI agent" demos are thin wrappers around a single API call. Kairos is a **genuine multi-agent system** that makes real decisions:
+Kairos is a **genuine multi-agent system** that makes real decisions:
 
 - **Agents don't see each other's code.** The Idea Agent, Simulation Agent, and Video Editor are plain Python classes behind abstract interfaces. LangGraph orchestrates them, but they have zero framework dependency.
 - **Agents iterate on failure.** A simulation that fails validation triggers config adjustment (not regeneration from scratch). Video and audio quality gates route back to earlier agents when they detect problems.
@@ -40,7 +40,6 @@ graph LR
     HR -. "bad sim" .-> SA
 
     subgraph Engines
-        PM[Pygame + Pymunk]
         BL[Blender 3D]
     end
 
@@ -57,7 +56,6 @@ graph LR
         LL[Learning Loop]
     end
 
-    SA --> PM
     SA --> BL
     VE --> FF
     VE --> MUS
@@ -70,7 +68,7 @@ graph LR
 ### How a Run Works
 
 1. **Idea Agent** — Analyses category stats (SQL, no LLM), selects the next category via programmatic rotation rules, then generates a `ConceptBrief` via Claude with Instructor structured output.
-2. **Simulation Agent** — LLM generates a JSON config (not raw code). A fixed template per category renders it into runnable Pygame+Pymunk or Blender code. Executes in a Docker sandbox. Validates output. Adjusts config and retries up to 5 times.
+2. **Simulation Agent** — LLM generates a JSON config (not raw code). A fixed template per category renders it into Blender scenes. Executes headless via `blender --background`. Validates output. Adjusts config and retries up to 5 times.
 3. **Video Editor Agent** — Selects music by mood tags, generates captions, assembles the final 9:16 video via FFmpeg.
 4. **Video Review** — Vision LLM extracts frames and evaluates visual quality. Routes back to Simulation Agent if it detects problems.
 5. **Audio Review** — Omni-modal LLM + FFmpeg ebur128 loudness analysis. Routes back to Video Editor if audio is poor.
@@ -88,9 +86,14 @@ src/kairos/
 ├── orchestrator/        # LangGraph graph, state, routing logic, registry
 ├── pipelines/           # Pipeline adapters + per-pipeline agents
 │   ├── adapters/        #   @register_pipeline implementations
-│   ├── physics/         #   Pygame+Pymunk agents, templates, models
+│   ├── physics/         #   Blender physics agents + models
 │   ├── domino/          #   Blender domino agents + models
 │   └── marble/          #   Blender marble agents + models
+├── skills/              # Skill library — pure-data primitives
+│   ├── shared/          #   Paths, connectors, surfaces, environment
+│   ├── domino/          #   place_domino, spacing, rigid body, trigger
+│   └── marble_run/      #   Track pieces, ball physics, connector validator
+├── calibration/         # ChromaDB calibration learning system
 ├── ai/                  # AI layer (no business logic)
 │   ├── llm/             #   LiteLLM routing, config, capabilities
 │   ├── tracing/         #   RunTracer, event models, sinks (JSONL, Langfuse, DB)
@@ -103,7 +106,6 @@ src/kairos/
 │   ├── audio/           #   SFX pool, Freesound, synthetic, mixing
 │   └── environment/     #   Blender environment theming
 ├── engines/             # Execution backends
-│   ├── pymunk/          #   Docker sandbox for Pygame+Pymunk
 │   └── blender/         #   Blender subprocess orchestrator
 ├── schemas/             # All Pydantic contracts (90+ models)
 ├── db/                  # SQLAlchemy models + async operations
@@ -155,7 +157,7 @@ pipeline resume <run-id>           # Resume interrupted run
 ### Test
 
 ```bash
-pytest tests/ -q --timeout=60     # Full suite (~600 tests)
+pytest tests/ -q --timeout=60     # Full suite (~844 tests)
 pytest tests/unit/ -m unit        # Fast unit tests only
 pytest tests/integration/         # Requires Docker services
 ```
@@ -175,6 +177,8 @@ Key architectural choices and the reasoning behind them. Full ADRs in [docs/adr/
 | Step-level input-hash caching | Each node hashes its relevant state fields | Reruns and retries skip completed work. Cache hit = zero cost, zero latency |
 | Prompt templates as files | Jinja2 `.txt` files in `ai/prompts/` | Prompts are diffable, reviewable in PRs, and version-controlled like code |
 | Two-tier validation | Tier 1: programmatic (FFprobe). Tier 2: AI (vision model) | Fast gate filters obvious failures. AI catches subtle quality issues |
+| Skills as pure-data functions | Skill primitives return dicts, not bpy calls | Testable outside Blender. 844 tests run in seconds with no GPU required |
+| Track piece connector system | Entry/exit ports with diameter + direction matching | Validates marble track integrity before Blender execution |
 
 ---
 
@@ -193,7 +197,7 @@ Token counts and costs are tracked per-call via `_extract_usage()` and surfaced 
 
 ## Known Limitations
 
-- **Marble pipeline** is under redesign — ramp geometry and Blender camera placement need work.
+- **Marble pipeline** has a full skill library (5 track piece types, connector validator, momentum calculator) but needs further Blender script integration for end-to-end runs.
 - **Tier 2 validation** (AI frame inspection) is implemented but the original vision model (`moondream2`) was removed from Ollama's registry. Qwen3-VL is used for video review instead.
 - **Publishing** is queue-ready but platform adapters (TikTok, YouTube Shorts, Instagram Reels) are not yet implemented.
 - **Windows-primary development** — tested on Windows 11 with WSL2 Docker. Linux/macOS should work but isn't CI-verified.
@@ -222,12 +226,12 @@ Token counts and costs are tracked per-call via `_extract_usage()` and surfaced 
 | Orchestration | LangGraph 0.3 |
 | LLM routing | LiteLLM + Instructor (structured output) |
 | Models | Claude Sonnet (cloud), Mistral 7B / Llama 3.1 8B (local via Ollama) |
-| Simulation | Pygame 2.6 + Pymunk 6.8 (physics), Blender 3D (domino/marble) |
+| Simulation | Blender 3D 5.x (headless, Bullet physics) |
 | Video | FFmpeg (composition, validation, frame extraction) |
 | Database | PostgreSQL 16 + SQLAlchemy 2 (async) + Alembic |
 | API | FastAPI + WebSocket (live event streaming) |
 | Tracing | Custom RunTracer → JSONL files, Langfuse, PostgreSQL |
-| Testing | pytest + pytest-asyncio (600 tests, ~50s) |
+| Testing | pytest + pytest-asyncio (844 tests) |
 | Config | pydantic-settings from `.env` |
 
 ---
