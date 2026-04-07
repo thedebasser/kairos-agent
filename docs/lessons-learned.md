@@ -8,7 +8,7 @@ Honest post-mortem on building Kairos Agent. What worked, what didn't, and what 
 
 ### 1. Config-Based Simulation Was the Single Best Decision
 
-Early versions had the LLM generate complete Pygame+Pymunk code. The success rate was ~40% on first attempt. Switching to JSON configs rendered by fixed templates brought it to ~75%.
+Early versions had the LLM generate complete Blender Python code. The success rate was ~40% on first attempt. Switching to JSON configs rendered by fixed templates brought it to ~75%.
 
 The key insight: **constrain the LLM's output space.** A JSON config with 15 numeric fields is a tiny target compared to 200 lines of Python. The LLM is still doing useful creative work (choosing colours, physics parameters, object counts), but it can't hallucinate API calls or import non-existent modules.
 
@@ -44,8 +44,8 @@ This turned 30-minute debugging sessions into 2-minute "read the timeline" sessi
 ### 1. Raw Code Generation (Abandoned)
 
 The original approach of having the LLM write complete simulation programs was a dead end for production use. Specific failure modes:
-- **API confusion.** The LLM mixed up Pymunk and Pygame APIs, created non-existent methods, used deprecated parameters.
-- **Resource leaks.** Generated code often forgot to quit Pygame or close file handles, causing Docker sandbox to hang.
+- **API confusion.** The LLM mixed up Blender Python APIs, created non-existent methods, used deprecated parameters.
+- **Resource leaks.** Generated code often forgot to clean up Blender scenes or close file handles, causing Docker sandbox to hang.
 - **Resolution bugs.** Despite explicit prompting, the LLM frequently generated landscape (1920×1080) instead of portrait (1080×1920) simulations.
 - **Inconsistent structure.** Every generated program was structured differently, making validation heuristics brittle.
 

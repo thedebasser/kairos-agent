@@ -167,8 +167,6 @@ module = [
     "langfuse.*",
     "litellm.*",
     "llama_index.*",
-    "pymunk.*",
-    "pygame.*",
     "redis.*",
 ]
 ignore_missing_imports = true

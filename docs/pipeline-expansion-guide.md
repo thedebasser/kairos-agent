@@ -14,7 +14,7 @@ This document covers how to extend the Kairos Agent platform with new pipelines,
 
 ## Adding a New Pipeline
 
-A "pipeline" in Kairos is a complete content production workflow — from idea generation through video editing. The default pipeline is `physics` (Pygame + Pymunk simulations). To add a new pipeline (e.g., `3d_renders`, `data_viz`):
+A "pipeline" in Kairos is a complete content production workflow — from idea generation through video editing. The default pipeline is `physics` (Blender simulations). To add a new pipeline (e.g., `3d_renders`, `data_viz`):
 
 ### 1. Create the Sandbox Dockerfile
 

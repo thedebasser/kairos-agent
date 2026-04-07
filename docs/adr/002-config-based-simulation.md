@@ -5,9 +5,9 @@
 
 ## Context
 
-The Simulation Agent needs to produce runnable Pygame+Pymunk code from concept briefs. The naive approach — having the LLM generate complete Python source code — was the original implementation. It suffered from:
+The Simulation Agent needs to produce runnable Blender Python scripts from concept briefs. The naive approach — having the LLM generate complete Python source code — was the original implementation. It suffered from:
 
-- **High hallucination rate.** LLMs confuse Pymunk APIs, generate invalid physics parameters, import non-existent modules.
+- **High hallucination rate.** LLMs confuse Blender APIs, generate invalid physics parameters, import non-existent modules.
 - **Unbounded output space.** Any Python code is valid output, making validation nearly impossible before execution.
 - **Expensive iteration.** When a simulation fails, the LLM must regenerate the entire program, not just fix one parameter.
 - **Non-deterministic.** Same concept → wildly different code structures → inconsistent results.

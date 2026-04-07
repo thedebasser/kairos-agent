@@ -110,11 +110,11 @@ Select the best category for the next video.
 version: 1
 description: "Creative concept developer"
 ---
-You are a creative director for a short-form video channel that produces 'Oddly Satisfying' physics simulation videos using Pygame and Pymunk.
+You are a creative director for a short-form video channel that produces 'Oddly Satisfying' physics simulation videos using Blender's rigid body physics engine.
 
 Your job is to generate 3 RANKED concepts for the selected category. Each concept must be:
 - Visually distinct and satisfying to watch
-- Technically feasible with Pygame + Pymunk (2D rigid body physics)
+- Technically feasible with Blender rigid body physics (3D rendering)
 - Capable of filling a 65-second video with escalating visual interest
 - Hook-worthy (the first 2 seconds must show objects in motion)
 
@@ -185,7 +185,7 @@ Category: {{ category }}
 Description: {{ category_description }}
 Existing videos in this category: {{ existing_count }}
 
-Generate 3 ranked concepts. The top concept should be your strongest recommendation — prioritise FEASIBILITY (will it actually work as a Pymunk simulation?) over novelty.
+Generate 3 ranked concepts. The top concept should be your strongest recommendation — prioritise FEASIBILITY (will it actually work as a Blender rigid body simulation?) over novelty.
 ```
 
 ---
@@ -418,7 +418,7 @@ Use the full colour palette and fill the visible canvas with objects.
 - **Local model:** `ollama/mistral:7b-instruct-q4_0` (`sim-param-adjust`) — tried first
 - **Cloud model:** `claude-sonnet-4-6` (`simulation-debugger`) — fallback if local output fails quality gate
 - **Call pattern:** `quality_fallback`
-- **Quality gate:** Output must contain `'pygame'`, `'pymunk'`, `'simulation.mp4'` and be >500 chars
+- **Quality gate:** Output must contain `'bpy'`, `'rigid_body'`, `'simulation.mp4'` and be >500 chars
 - **Task:** Fix a failed simulation config/script based on validation error report. Returns complete corrected script.
 - **Training data:** Every successful cloud call is logged to Postgres `training_examples` and `knowledge/cloud_learnings/`
 
@@ -429,16 +429,16 @@ Use the full colour palette and fill the visible canvas with objects.
 version: 1
 description: "Legacy simulation code generation"
 ---
-You are an expert Pygame 2.6 + Pymunk 6.8 simulation engineer.
-Return ONLY a complete, self-contained Python script.
+You are an expert Blender Python (bpy) simulation engineer specialising in rigid body physics.
+Return ONLY a complete, self-contained Blender Python script.
 
 MANDATORY RULES:
-1. Set pymunk.pygame_util.positive_y_is_up = False FIRST
-2. Use space.gravity = (0, 900) — Y-down, positions = screen pixels
-3. ALWAYS use pymunk.moment_for_circle/box() — NEVER hardcode moment
-4. Elasticity is MULTIPLIED: shape1 × shape2 = effective bounce
-5. Headless: pygame.Surface, NO display.set_mode/flip
-6. Pipe frames to FFmpeg subprocess → /workspace/output/simulation.mp4
+1. Set scene gravity via bpy.context.scene.gravity = (0, 0, -9.81)
+2. Use Blender's Z-up coordinate convention
+3. ALWAYS set rigid_body.mass directly — Blender auto-calculates inertia from collision shape
+4. Restitution is per-object (0.0–1.0); effective bounce is averaged
+5. Headless: bpy.ops.render.render() with background mode (blender --background)
+6. Render frames to PNG sequence, FFmpeg encodes to /workspace/output/simulation.mp4
 7. Print PAYOFF_TIMESTAMP=<sec> and PEAK_BODY_COUNT=<n> to stdout
 ```
 
@@ -475,10 +475,10 @@ For raw code generation (legacy path), prompts are assembled from fragments via 
 version: 1
 description: "Shared simulation engineer role"
 ---
-You are a physics simulation engineer writing Python code using Pygame 2.6 and Pymunk 6.8.
+You are a physics simulation engineer writing Blender Python scripts using the bpy API.
 
 ## Task
-Generate a COMPLETE, RUNNABLE Python script that renders an "Oddly Satisfying" {{ category_label }} simulation as a vertical video (1080x1920, 30 FPS, 62-68 seconds).
+Generate a COMPLETE, RUNNABLE Blender Python script that renders an "Oddly Satisfying" {{ category_label }} simulation as a vertical video (1080x1920, 30 FPS, 62-68 seconds).
 ```
 
 **Shared fragment 2 — `_shared/concept_details.txt`**
@@ -506,13 +506,12 @@ description: "Shared concept details template"
 version: 1
 description: "Shared coordinate system reference"
 ---
-## MANDATORY: Coordinate Convention (Y-Down)
-Use pygame-native Y-down coordinates. This eliminates ALL coordinate conversion bugs.
+## MANDATORY: Coordinate Convention (Z-Up)
+Use Blender's Z-up coordinate convention. Gravity direction is (0, 0, -9.81).
 
-pymunk.pygame_util.positive_y_is_up = False  # CRITICAL — set BEFORE any bodies
-space.gravity = (0, {{ gravity_y }})         # Positive Y = down (screen coords)
-# Positions map DIRECTLY to screen pixels — no conversion needed
-# screen_pos = (body.position.x, body.position.y)  ← draw directly
+bpy.context.scene.gravity = (0, 0, -9.81)  # Z-up convention
+# Blender uses metres as default unit scale
+# Camera setup handles portrait (1080x1920) framing
 ```
 
 **Shared fragment 4 — `_shared/technical_reqs.txt`**
@@ -523,11 +522,11 @@ description: "Shared technical requirements"
 ---
 ## Technical Requirements
 1. Output: `/workspace/output/simulation.mp4` (1080x1920, 30 FPS, {{ target_duration_sec }}s)
-2. Headless: `os.environ['SDL_VIDEODRIVER'] = 'dummy'` — NO `pygame.display.set_mode()` or `flip()`
-3. Capture: `pygame.image.tostring(screen, 'RGB')` piped to ffmpeg subprocess
-4. Physics: `space.step(1/60)` called TWICE per frame (2 substeps = 60Hz physics)
+2. Headless: `bpy.ops.render.render()` with background mode (`blender --background`)
+3. Capture: Blender renders frames to PNG sequence, then FFmpeg encodes to MP4
+4. Physics: Rigid body world substeps = 120 (2x frame rate for stability)
 5. Stdout: print `PAYOFF_TIMESTAMP=<seconds>` and `PEAK_BODY_COUNT=<n>`
-6. Imports: ONLY pygame, pymunk, pymunk.pygame_util, subprocess, random, math, os, sys, time
+6. Imports: ONLY bpy, mathutils, subprocess, random, math, os, sys, time
 ```
 
 **Category fragment (example) — `categories/ball_pit.txt`** (abridged)
@@ -537,13 +536,13 @@ version: 1
 description: "Ball pit category prompt"
 ---
 ## MANDATORY: Physics Parameters
-Pymunk MULTIPLIES elasticity of both colliding shapes: ball(0.7) × wall(0.5) = effective 0.35 bounce.
-Set both sides higher than you think!
-- Ball radius: 15-30px | mass: 1.0-3.0 | elasticity: 0.7-0.85 | friction: 0.3-0.5
-- Wall/platform elasticity: 0.5-0.7 | friction: 0.5-0.7
-- space.damping = 0.99 (light air drag, keeps things moving)
-- ALWAYS: `moment = pymunk.moment_for_circle(mass, 0, radius)` — NEVER guess moment
-- Max 200 bodies. Remove offscreen bodies (y > HEIGHT+200) every frame.
+Blender rigid body restitution is per-object (0.0–1.0). Effective bounce is averaged, not multiplied.
+Set restitution higher than you think!
+- Ball radius: 0.02–0.05m | mass: 1.0–3.0 | restitution: 0.7–0.85 | friction: 0.3–0.5
+- Wall/platform restitution: 0.5–0.7 | friction: 0.5–0.7
+- Rigid body world damping: 0.04 (light air drag, keeps things moving)
+- ALWAYS: set rigid_body.mass directly — Blender auto-calculates inertia from collision shape
+- Max 200 bodies. Remove off-camera bodies each frame.
 
 ## MANDATORY: Energy Curve (4 phases — psychology-driven)
 1. Calm Intro (0-15s): 1-2 balls/sec — Zeigarnik tension loading
@@ -552,7 +551,7 @@ Set both sides higher than you think!
 4. Resolution (55-Ns): No new spawns, natural settling, clear end state
 
 ## Scene Construction
-Keep it SIMPLE: 2-4 static platforms/funnels made from `pymunk.Segment`.
+Keep it SIMPLE: 2-4 static platforms/funnels made from Blender mesh objects with Passive rigid body type.
 [Includes verified working example code illustrating scene setup, drawing functions,
  FFmpeg subprocess pipe pattern, spawn ramp, and climax gate-removal mechanics]
 ```
@@ -724,8 +723,8 @@ Requirements:
 | **Idea — Physics** | Concept Developer | None | Claude Sonnet 4.6 | `direct` cloud | File-based, learning loop context injection |
 | **Idea — Domino** | Concept Developer | None | Claude Sonnet 4.6 | `direct` cloud | Inline + rulebook injection |
 | **Idea — Marble** | Concept Developer | None | Claude Sonnet 4.6 | `direct` cloud | Inline |
-| **Simulation — Physics** | Config Generation | None | Claude Sonnet 4.6 | `direct` cloud | File-based + learning loop (validation rules + few-shot + category knowledge) |
-| **Simulation — Physics** | Param Adjustment | Mistral 7B | Claude Sonnet 4.6 | `quality_fallback` | File-based |
+| **Simulation — Physics** | Config Generation | None | Claude Sonnet 4.6 | `direct` cloud | Inline prompts + learning loop (validation rules + few-shot + category knowledge) |
+| **Simulation — Physics** | Retry (re-generation) | None | Claude Sonnet 4.6 | `direct` cloud | Inline prompts (calibration-informed) |
 | **Simulation — Domino** | All steps | None | None | Blender subprocess | N/A |
 | **Simulation — Marble** | All steps | None | None | Blender subprocess | N/A |
 | **Video Editor** | Caption Writer | None | Claude Sonnet 4.6 | `direct` cloud | File-based (physics) / Inline (domino/marble) |
@@ -793,5 +792,4 @@ knowledge/
   domino_rulebook.md                      Injected into domino idea agent system prompt
   cloud_learnings/                        Training data filesystem store
   common_bugs/                            Known failure patterns (RAG source)
-  pymunk_patterns/                        Reusable code patterns (RAG source)
 ```

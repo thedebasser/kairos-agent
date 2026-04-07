@@ -57,9 +57,6 @@ IMPORT_REWRITES: list[tuple[str, str]] = [
     # ── eval -> ai.eval ────────────────────────────────────────────────────
     ("kairos.eval", "kairos.ai.eval"),
 
-    # ── services.sandbox -> engines.pymunk.sandbox ─────────────────────────
-    ("kairos.services.sandbox", "kairos.engines.pymunk.sandbox"),
-    ("kairos.services.code_validation", "kairos.engines.pymunk.code_validation"),
 
     # ── services.environment -> engines.blender.environment / services.audio
     ("kairos.services.environment.orchestrator", "kairos.engines.blender.environment.orchestrator"),

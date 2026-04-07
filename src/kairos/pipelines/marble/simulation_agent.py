@@ -343,72 +343,6 @@ class MarbleSimulationAgent(SimulationAgent):
         )
 
     # ------------------------------------------------------------------
-    # ABC: adjust_parameters
-    # ------------------------------------------------------------------
-
-    async def adjust_parameters(
-        self,
-        code: str,
-        validation_result: ValidationResult,
-        iteration: int,
-    ) -> str:
-        """Adjust config and regenerate course on validation failure.
-
-        For now: bump solver iterations and substeps, then regenerate.
-        Future: use LLM to diagnose and fix.
-        """
-        blend_path = Path(code)
-        work_dir = blend_path.parent
-        config_path = work_dir / "config.json"
-
-        if config_path.exists():
-            config = json.loads(config_path.read_text(encoding="utf-8"))
-        else:
-            config = {}
-
-        # Simple adjustments based on iteration
-        config["substeps_per_frame"] = min(
-            30, config.get("substeps_per_frame", 10) + 5
-        )
-        config["solver_iterations"] = min(
-            60, config.get("solver_iterations", 20) + 10
-        )
-        # Reduce marble count slightly if physics are unstable
-        if config.get("marble_count", 20) > 10:
-            config["marble_count"] = max(10, config["marble_count"] - 5)
-
-        config_path.write_text(
-            json.dumps(config, indent=2),
-            encoding="utf-8",
-        )
-
-        logger.info(
-            "[marble_sim] Adjusted config (iter %d): substeps=%d, solver=%d, marbles=%d",
-            iteration,
-            config.get("substeps_per_frame"),
-            config.get("solver_iterations"),
-            config.get("marble_count"),
-        )
-
-        # Re-generate course with adjusted config
-        new_blend = work_dir / f"course_v{iteration}.blend"
-        result = await run_blender_script(
-            "generate_course.py",
-            script_args=[
-                "--config", str(config_path),
-                "--output-blend", str(new_blend),
-            ],
-            timeout_sec=300,
-        )
-
-        if result["returncode"] != 0:
-            raise SimulationExecutionError(
-                f"Re-generation failed on iteration {iteration}"
-            )
-
-        return str(new_blend)
-
-    # ------------------------------------------------------------------
     # ABC: get_simulation_stats
     # ------------------------------------------------------------------
 
@@ -464,7 +398,7 @@ class MarbleSimulationAgent(SimulationAgent):
     ) -> SimulationLoopResult:
         """Run the full Blender simulation pipeline with validation loop.
 
-        generate → validate → (adjust → regenerate)* → bake_and_render
+        generate → validate → regenerate → bake_and_render
 
         Returns a narrow ``SimulationLoopResult`` (Finding 2.2).
         """
@@ -477,16 +411,8 @@ class MarbleSimulationAgent(SimulationAgent):
             result.simulation_iteration = iteration
             logger.info("[marble_sim] === Iteration %d/%d ===", iteration, MAX_ITERATIONS)
 
-            # Step 1: Generate course
-            if iteration == 1:
-                blend_path = await self.generate_simulation(concept)
-            else:
-                # Use adjusted config
-                blend_path = await self.adjust_parameters(
-                    blend_path,
-                    result.validation_result,  # type: ignore
-                    iteration,
-                )
+            # Step 1: Generate course (calibration drives first-pass quality)
+            blend_path = await self.generate_simulation(concept)
 
             result.simulation_code = blend_path
 

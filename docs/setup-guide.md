@@ -219,7 +219,7 @@ LANGFUSE_HOST=http://localhost:3000
 
 ## 8. Build the Simulation Sandbox Image
 
-The simulation agent runs generated Pygame+Pymunk code inside a Docker container for isolation.
+The simulation agent runs generated Blender scripts inside a Docker container for isolation.
 
 ```powershell
 docker build -t simulation-sandbox:latest ./sandbox

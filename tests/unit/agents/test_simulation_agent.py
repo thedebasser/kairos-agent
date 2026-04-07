@@ -1,7 +1,7 @@
 """Unit tests for PhysicsSimulationAgent.
 
 Tests simulation code generation, sandbox execution, validation,
-parameter adjustment, stats extraction, and the full run_loop.
+stats extraction, and the full run_loop.
 All LLM and sandbox calls are mocked.
 """
 
@@ -28,7 +28,7 @@ from kairos.schemas.contracts import (
     ValidationCheck,
     ValidationResult,
 )
-from kairos.schemas.simulation import AdjustedSimulationCode, AdjustedSimulationConfig, SimulationCode, SimulationConfigOutput
+from kairos.schemas.simulation import AdjustedSimulationConfig, SimulationCode, SimulationConfigOutput
 from kairos.pipelines.physics.simulation_agent import PhysicsSimulationAgent
 
 pytestmark = [pytest.mark.unit]
@@ -144,28 +144,40 @@ class TestGenerateSimulation:
         agent: PhysicsSimulationAgent,
         sample_concept: ConceptBrief,
     ) -> None:
-        """The prompt should include concept title, body counts, colours, etc."""
+        """The generated config call should use concept details."""
         mock_routing.call_llm = AsyncMock(
-            return_value=SimulationCode(code="code", reasoning="test")
+            return_value=SimulationConfigOutput(
+                config={"layout": "grid", "ball_count": 50},
+                reasoning="Simple test",
+            )
         )
 
-        # Verify prompt building works
-        prompt = agent._build_generation_prompt(sample_concept)  # noqa: SLF001
-        assert sample_concept.title in prompt
-        assert str(sample_concept.simulation_requirements.body_count_initial) in prompt
-        assert str(sample_concept.simulation_requirements.body_count_max) in prompt
-        assert sample_concept.simulation_requirements.background_colour in prompt
+        code = await agent.generate_simulation(sample_concept)
 
-    def test_prompt_template_missing_raises(
+        # Verify the LLM was called with messages containing concept info
+        call_kwargs = mock_routing.call_llm.call_args
+        messages = call_kwargs.kwargs.get("messages") or call_kwargs[1].get("messages", [])
+        user_msg = next((m["content"] for m in messages if m["role"] == "user"), "")
+        assert sample_concept.title in user_msg
+
+    @patch("kairos.pipelines.physics.simulation_agent.llm_routing")
+    async def test_returns_json_config(
         self,
+        mock_routing: MagicMock,
         agent: PhysicsSimulationAgent,
         sample_concept: ConceptBrief,
     ) -> None:
-        """Should raise when the category has no prompt template."""
-        from kairos.ai.prompts.physics.builder import build_simulation_prompt
+        """Should return a JSON string from the LLM config output."""
+        mock_routing.call_llm = AsyncMock(
+            return_value=SimulationConfigOutput(
+                config={"layout": "grid"},
+                reasoning="test",
+            )
+        )
 
-        with pytest.raises(ValueError, match="Unknown category"):
-            build_simulation_prompt("nonexistent_category", {})
+        code = await agent.generate_simulation(sample_concept)
+        parsed = json.loads(code)
+        assert parsed["layout"] == "grid"
 
 
 # ---------------------------------------------------------------------------
@@ -176,46 +188,45 @@ class TestGenerateSimulation:
 class TestExecuteSimulation:
     """Tests for execute_simulation."""
 
-    @patch("kairos.pipelines.physics.simulation_agent.sandbox")
+    @patch("kairos.pipelines.physics.simulation_agent.run_blender_script")
     async def test_delegates_to_sandbox(
         self,
-        mock_sandbox: MagicMock,
+        mock_blender: MagicMock,
         agent: PhysicsSimulationAgent,
         passing_sim_result: SimulationResult,
     ) -> None:
-        """Should delegate to sandbox.execute_simulation (async)."""
-        mock_sandbox.execute_simulation = AsyncMock(return_value=passing_sim_result)
+        """Should delegate to run_blender_script (async)."""
+        mock_blender.return_value = passing_sim_result
 
-        result = await agent.execute_simulation("import pygame")
+        result = await agent.execute_simulation('{"scene": "test"}')
 
         assert result.returncode == 0
         assert result.output_files == ["/workspace/output/simulation.mp4"]
-        mock_sandbox.execute_simulation.assert_called_once()
+        mock_blender.assert_called_once()
 
-    @patch("kairos.pipelines.physics.simulation_agent.sandbox")
+    @patch("kairos.pipelines.physics.simulation_agent.run_blender_script")
     async def test_propagates_timeout_error(
         self,
-        mock_sandbox: MagicMock,
+        mock_blender: MagicMock,
         agent: PhysicsSimulationAgent,
     ) -> None:
-        """Should propagate SimulationTimeoutError from sandbox."""
-        mock_sandbox.execute_simulation = AsyncMock(
-            side_effect=SimulationTimeoutError("Exceeded 300s timeout")
-        )
+        """Should propagate SimulationTimeoutError from executor."""
+        mock_blender.side_effect = SimulationTimeoutError("Exceeded 300s timeout")
 
         with pytest.raises(SimulationTimeoutError):
             await agent.execute_simulation("import time; time.sleep(999)")
 
-    @patch("kairos.pipelines.physics.simulation_agent.sandbox")
+    @patch("kairos.pipelines.physics.simulation_agent.run_blender_script")
     async def test_propagates_oom_error(
         self,
-        mock_sandbox: MagicMock,
+        mock_blender: MagicMock,
         agent: PhysicsSimulationAgent,
     ) -> None:
-        """Should propagate SimulationOOMError from sandbox."""
-        mock_sandbox.execute_simulation = AsyncMock(
-            side_effect=SimulationOOMError("OOM kill")
-        )
+        """Should propagate SimulationOOMError from executor."""
+        mock_blender.side_effect = SimulationOOMError("OOM kill")
+
+        with pytest.raises(SimulationOOMError):
+            await agent.execute_simulation("x = [0] * 10**10")
 
         with pytest.raises(SimulationOOMError):
             await agent.execute_simulation("x = [0] * 10**10")
@@ -245,93 +256,6 @@ class TestValidateOutput:
         mock_validation.validate_simulation.assert_called_once_with(
             "/path/to/video.mp4", run_tier2=False, skip_checks={"audio_present"}
         )
-
-
-# ---------------------------------------------------------------------------
-# adjust_parameters
-# ---------------------------------------------------------------------------
-
-
-class TestAdjustParameters:
-    """Tests for adjust_parameters."""
-
-    @patch("kairos.pipelines.physics.simulation_agent.build_simulation_script", return_value="import pygame\n# fixed")
-    @patch("kairos.pipelines.physics.simulation_agent.CONFIG_REGISTRY")
-    @patch("kairos.pipelines.physics.simulation_agent._adjustment_models", return_value=("sim-param-adjust", "simulation-debugger"))
-    @patch("kairos.pipelines.physics.simulation_agent.load_system_prompt")
-    @patch("kairos.pipelines.physics.simulation_agent.build_user_prompt")
-    @patch("kairos.pipelines.physics.simulation_agent.llm_routing")
-    async def test_sends_failed_checks_to_llm(
-        self,
-        mock_routing: MagicMock,
-        mock_build_user: MagicMock,
-        mock_load_sys: MagicMock,
-        mock_adj_models: MagicMock,
-        mock_config_reg: MagicMock,
-        mock_build_script: MagicMock,
-        agent: PhysicsSimulationAgent,
-        failing_validation: ValidationResult,
-    ) -> None:
-        """Should include failed check details in the adjustment prompt."""
-        def _fake_user_prompt(name, vars):
-            m = MagicMock()
-            m.text = vars.get("failed_summary", "")
-            return m
-
-        mock_build_user.side_effect = _fake_user_prompt
-        mock_load_sys.return_value = MagicMock(text="system prompt")
-        mock_config_reg.get.return_value = None
-
-        mock_routing.call_llm = AsyncMock(
-            return_value=AdjustedSimulationConfig(
-                config={"resolution": [1080, 1920]},
-                changes_made=["Changed resolution to 1080x1920"],
-                reasoning="Swapped width and height",
-            )
-        )
-
-        code = await agent.adjust_parameters(
-            "import pygame\n# original", failing_validation, 2
-        )
-
-        assert "fixed" in code
-        call_args = mock_routing.call_llm.call_args
-        messages = call_args.kwargs.get("messages")
-        user_msg = messages[-1]["content"]
-        assert "resolution" in user_msg.lower()
-        assert "1920x1080" in user_msg
-
-    @patch("kairos.pipelines.physics.simulation_agent.build_simulation_script", return_value="fixed")
-    @patch("kairos.pipelines.physics.simulation_agent.CONFIG_REGISTRY")
-    @patch("kairos.pipelines.physics.simulation_agent._adjustment_models", return_value=("sim-param-adjust", "simulation-debugger"))
-    @patch("kairos.pipelines.physics.simulation_agent.load_system_prompt")
-    @patch("kairos.pipelines.physics.simulation_agent.build_user_prompt")
-    @patch("kairos.pipelines.physics.simulation_agent.llm_routing")
-    async def test_uses_quality_fallback(
-        self,
-        mock_routing: MagicMock,
-        mock_build_user: MagicMock,
-        mock_load_sys: MagicMock,
-        mock_adj_models: MagicMock,
-        mock_config_reg: MagicMock,
-        mock_build_script: MagicMock,
-        agent: PhysicsSimulationAgent,
-        failing_validation: ValidationResult,
-    ) -> None:
-        """Should use simulation-debugger model for config adjustment."""
-        mock_build_user.return_value = MagicMock(text="user prompt")
-        mock_load_sys.return_value = MagicMock(text="system prompt")
-        mock_config_reg.get.return_value = None
-
-        mock_routing.call_llm = AsyncMock(
-            return_value=AdjustedSimulationConfig(config={}, changes_made=[])
-        )
-
-        await agent.adjust_parameters("code", failing_validation, 1)
-
-        call_args = mock_routing.call_llm.call_args
-        model = call_args.kwargs.get("model")
-        assert model == "simulation-debugger"
 
 
 # ---------------------------------------------------------------------------
@@ -437,7 +361,7 @@ class TestRunLoop:
     ) -> None:
         """Happy path: generate → execute → validate passes on first try."""
         with (
-            patch.object(agent, "generate_simulation", new_callable=AsyncMock, return_value="import pygame\n# simulation"),
+            patch.object(agent, "generate_simulation", new_callable=AsyncMock, return_value='{"scene": "domino_course"}'),
             patch.object(agent, "execute_simulation", new_callable=AsyncMock, return_value=passing_sim_result),
             patch.object(agent, "validate_output", new_callable=AsyncMock, return_value=passing_validation),
             patch.object(agent, "_ffprobe", return_value={
@@ -448,7 +372,7 @@ class TestRunLoop:
             result = await agent.run_loop(sample_concept)
 
         assert result.simulation_iteration == 1
-        assert result.simulation_code == "import pygame\n# simulation"
+        assert result.simulation_code == '{"scene": "domino_course"}'
         assert result.raw_video_path == "/workspace/output/simulation.mp4"
         assert result.validation_result is not None
         assert result.validation_result.passed is True
@@ -462,25 +386,23 @@ class TestRunLoop:
         passing_validation: ValidationResult,
         failing_validation: ValidationResult,
     ) -> None:
-        """Should adjust code and retry when validation fails."""
-        mock_adjust = AsyncMock(return_value="fixed code")
+        """Should retry execution when validation fails."""
         with (
             patch.object(agent, "generate_simulation", new_callable=AsyncMock, return_value="original code"),
             patch.object(agent, "execute_simulation", new_callable=AsyncMock, return_value=passing_sim_result),
             patch.object(agent, "validate_output", new_callable=AsyncMock, side_effect=[failing_validation, passing_validation]),
-            patch.object(agent, "adjust_parameters", mock_adjust),
             patch.object(agent, "_ffprobe", return_value={
                 "format": {"duration": "65.0", "size": "45000000"},
                 "streams": [{"codec_type": "video", "r_frame_rate": "30/1", "nb_frames": "1950"}],
             }),
+            patch.object(agent, "_check_completion_from_stdout", return_value=(True, 1.0, "OK")),
         ):
             result = await agent.run_loop(sample_concept)
 
+        # The agent generates once then retries execution with the same config
         assert result.simulation_iteration == 2
-        assert result.simulation_code == "fixed code"
         assert result.validation_result is not None
         assert result.validation_result.passed is True
-        assert mock_adjust.await_count == 1
 
     async def test_handles_execution_failure(
         self,
@@ -489,13 +411,12 @@ class TestRunLoop:
         passing_sim_result: SimulationResult,
         passing_validation: ValidationResult,
     ) -> None:
-        """Should catch execution errors, adjust, and retry."""
+        """Should catch execution errors and retry."""
         with (
-            patch.object(agent, "generate_simulation", new_callable=AsyncMock, return_value="broken code"),
+            patch.object(agent, "generate_simulation", new_callable=AsyncMock, return_value="code"),
             patch.object(agent, "execute_simulation", new_callable=AsyncMock,
                 side_effect=[SimulationExecutionError("Docker failed"), passing_sim_result]),
             patch.object(agent, "validate_output", new_callable=AsyncMock, return_value=passing_validation),
-            patch.object(agent, "adjust_parameters", new_callable=AsyncMock, return_value="fixed code"),
             patch.object(agent, "_ffprobe", return_value={
                 "format": {"duration": "65.0", "size": "45000000"},
                 "streams": [{"codec_type": "video", "r_frame_rate": "30/1", "nb_frames": "1950"}],
@@ -523,7 +444,6 @@ class TestRunLoop:
             patch.object(agent, "generate_simulation", new_callable=AsyncMock, return_value="code"),
             patch.object(agent, "execute_simulation", new_callable=AsyncMock, return_value=passing_sim_result),
             patch.object(agent, "validate_output", new_callable=AsyncMock, return_value=failing_validation),
-            patch.object(agent, "adjust_parameters", new_callable=AsyncMock, return_value="code v2"),
             patch.object(agent, "_ffprobe", return_value={
                 "format": {"duration": "65.0", "size": "45000000"},
                 "streams": [{"codec_type": "video", "r_frame_rate": "30/1", "nb_frames": "1950"}],
@@ -555,7 +475,6 @@ class TestRunLoop:
         with (
             patch.object(agent, "generate_simulation", new_callable=AsyncMock, return_value="code"),
             patch.object(agent, "execute_simulation", new_callable=AsyncMock, return_value=no_video_result),
-            patch.object(agent, "adjust_parameters", new_callable=AsyncMock, return_value="code v2"),
         ):
             result = await agent.run_loop(sample_concept)
 

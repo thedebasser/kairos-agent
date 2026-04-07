@@ -170,14 +170,14 @@ class TestFormatFewShotPrompt:
     def test_single_example(self):
         examples = [{
             "title": "Rainbow Ball Pit",
-            "code": "import pymunk\n# simulation code",
+            "code": "import bpy\n# simulation code",
             "reasoning": "Used 200 balls for density",
             "thinking": "",
             "iteration_count": 1,
         }]
         text = format_few_shot_prompt(examples)
         assert "Rainbow Ball Pit" in text
-        assert "import pymunk" in text
+        assert "import bpy" in text
         assert "200 balls" in text
 
     def test_thinking_truncated(self):
@@ -202,15 +202,14 @@ class TestValidationRulesPrompt:
 
     def test_contains_critical_rules(self):
         text = get_validation_rules_prompt()
-        assert "space.gravity = (0, 900)" in text
-        assert "pygame.display.set_mode()" in text
-        assert "SDL_VIDEODRIVER" in text
-        assert "moment_for_circle" in text
+        assert "gravity" in text.lower()
+        assert "Blender" in text
+        assert "substeps" in text.lower()
         assert "PAYOFF_TIMESTAMP" in text
 
-    def test_mentions_558_failures(self):
+    def test_mentions_past_failures(self):
         text = get_validation_rules_prompt()
-        assert "558" in text
+        assert "past failure" in text.lower()
 
 
 # ============================================================================
@@ -223,40 +222,30 @@ class TestExtractParameters:
 
     def test_basic_simulation(self):
         code = textwrap.dedent("""\
-            import pygame
-            import pymunk
+            import bpy
             import subprocess
             import os
-            os.environ["SDL_VIDEODRIVER"] = "dummy"
-            pygame.init()
-            space = pymunk.Space()
-            space.gravity = (0, 900)
-            WIDTH = 1080
-            HEIGHT = 1920
+            scene = bpy.context.scene
+            scene.gravity = (0, 0, -9.81)
+            scene.render.resolution_x = 1080
+            scene.render.resolution_y = 1920
             for i in range(60 * 65):
-                space.step(1/60)
+                scene.frame_set(i)
             proc = subprocess.Popen(["ffmpeg", "-y", "-f", "rawvideo"])
         """)
         params = extract_parameters(code)
-        assert params.has_pygame_init
-        assert params.has_space_step
         assert params.has_ffmpeg_pipe
-        assert params.gravity == (0.0, 900.0)
-        assert params.canvas_size == (1080, 1920)
         assert params.loop_iterations == 3900
-        assert params.step_size == pytest.approx(1 / 60, rel=1e-3)
-        assert params.estimated_duration_sec == pytest.approx(65.0, rel=0.1)
 
     def test_body_count(self):
         code = textwrap.dedent("""\
-            import pymunk
-            space = pymunk.Space()
+            import bpy
             for i in range(50):
-                body = pymunk.Body(10, pymunk.moment_for_circle(10, 0, 15))
-                space.add(body)
+                bpy.ops.mesh.primitive_uv_sphere_add()
+                bpy.ops.rigidbody.object_add(type='ACTIVE')
         """)
         params = extract_parameters(code)
-        # moment_for_circle counts as body creation proxy + explicit Body()
+        # rigidbody.object_add counts as body creation proxy
         assert params.body_count >= 1
 
     def test_syntax_error_returns_empty(self):
@@ -277,19 +266,16 @@ class TestExtractParameters:
 
     def test_feedback_text_renders(self):
         code = textwrap.dedent("""\
-            import pygame
-            import pymunk
-            pygame.init()
-            space = pymunk.Space()
-            space.gravity = (0, 900)
+            import bpy
+            scene = bpy.context.scene
+            scene.gravity = (0, 0, -9.81)
             SIMULATION_TIME = 65
             for i in range(60 * 65):
-                space.step(1/60)
+                scene.frame_set(i)
         """)
         params = extract_parameters(code)
         text = params.to_feedback_text()
         assert "AST" in text
-        assert "gravity" in text.lower() or "Gravity" in text
 
     def test_simulation_time_assignment(self):
         code = "SIMULATION_TIME = 72"

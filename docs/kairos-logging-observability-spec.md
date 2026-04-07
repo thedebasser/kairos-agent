@@ -189,7 +189,7 @@ Every LLM call — including failed attempts and retries — must be logged in t
   "quality_gate": {                      // null if no gate for this call
     "applied": true,
     "passed": true,
-    "checks_run": ["contains_pygame", "contains_pymunk", "min_length_500"],
+    "checks_run": ["contains_bpy_import", "valid_blender_scene", "min_length_500"],
     "failure_reason": null
   },
 

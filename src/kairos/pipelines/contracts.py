@@ -96,20 +96,6 @@ class SimulationAgent(ABC):
         ...
 
     @abstractmethod
-    async def adjust_parameters(
-        self,
-        code: str,
-        validation_result: ValidationResult,
-        iteration: int,
-    ) -> str:
-        """Adjust simulation parameters based on validation failures.
-
-        Uses local LLM (Mistral 7B) for mechanical parameter edits.
-        Escalates to Claude Sonnet for complex debugging.
-        """
-        ...
-
-    @abstractmethod
     async def get_simulation_stats(self, video_path: str) -> SimulationStats:
         """Extract statistics from a rendered simulation video."""
         ...
@@ -313,7 +299,7 @@ class PipelineAdapter(ABC):
     @property
     @abstractmethod
     def engine_name(self) -> str:
-        """Simulation engine name (e.g., 'pygame_pymunk', 'beamng')."""
+        """Simulation engine name (e.g., 'blender', 'beamng')."""
         ...
 
     @property

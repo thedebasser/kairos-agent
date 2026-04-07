@@ -114,7 +114,7 @@ steps:
   simulation_code_generation:
     agent: simulation_agent
     description: >
-      Writes the initial Pygame+Pymunk simulation code from the ConceptBrief.
+      Writes the initial Blender simulation config from the ConceptBrief.
       Complex code generation — cloud-only for reliability (when enable_cloud_fallback is true).
     local_model: ollama/glm-4.7-flash:latest
     cloud_model: claude-sonnet-4-6
@@ -136,7 +136,7 @@ steps:
     litellm_alias_cloud: simulation-debugger
     call_pattern: quality_fallback
     quality_gate: >
-      Code must contain 'pygame', 'pymunk', 'simulation.mp4' and be >500 chars.
+      Code must contain valid Blender config JSON and be >500 chars.
     fallback_note: >
       Cloud output is recorded as training data for future local model improvement.
 

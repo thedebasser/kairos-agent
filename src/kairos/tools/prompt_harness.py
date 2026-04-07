@@ -218,14 +218,6 @@ async def run_harness(
         border_style="blue",
     ))
 
-    # ----- Show prompt -----
-    prompt = agent._build_generation_prompt(concept)  # noqa: SLF001
-    console.print(Panel(
-        prompt[:2000] + ("..." if len(prompt) > 2000 else ""),
-        title="Generated Prompt (first 2000 chars)",
-        border_style="cyan",
-    ))
-
     if dry_run:
         console.print("[yellow]Dry run — skipping LLM call and execution[/yellow]")
         return
@@ -273,30 +265,6 @@ async def run_harness(
         console.print("\n[bold]Running validation...[/bold]")
         vresult = await agent.validate_output(video_path)
         _display_validation(vresult)
-
-        # ----- Adjustment loop -----
-        current_code = code
-        for i in range(2, max_iterations + 1):
-            if vresult.passed:
-                break
-            console.print(f"\n[bold yellow]Adjusting (iteration {i})...[/bold yellow]")
-            current_code = await agent.adjust_parameters(current_code, vresult, i)
-            adj_path = output_dir / f"simulation_{concept.seed}_iter{i}.py"
-            adj_path.write_text(current_code, encoding="utf-8")
-
-            try:
-                result = await agent.execute_simulation(current_code)
-            except (SimulationTimeoutError, SimulationOOMError, SimulationExecutionError) as exc:
-                console.print(f"[red]Execution failed (iter {i}): {exc}[/red]")
-                continue
-
-            video_path = agent._find_video(result)  # noqa: SLF001
-            if video_path is None:
-                console.print(f"[red]No MP4 output (iter {i})[/red]")
-                continue
-
-            vresult = await agent.validate_output(video_path)
-            _display_validation(vresult)
 
     console.print("\n[bold green]Harness run complete[/bold green]")
 

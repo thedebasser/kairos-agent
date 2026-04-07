@@ -19,8 +19,8 @@ class SimulationCode(BaseModel, frozen=True):
 
     code: str = Field(
         description=(
-            "Complete, self-contained Python script using Pygame + Pymunk "
-            "that renders a simulation video to /workspace/output/simulation.mp4"
+            "Complete, self-contained Blender simulation config "
+            "that drives rigid body physics rendering to an output MP4"
         ),
     )
     reasoning: str = Field(

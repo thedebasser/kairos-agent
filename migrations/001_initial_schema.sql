@@ -206,12 +206,12 @@ CREATE TABLE pipeline_config (
 );
 
 -- ============================================================================
--- Seed data — Physics pipeline initial config
+-- Seed data — Pipeline initial configs
 -- ============================================================================
 INSERT INTO pipeline_config (pipeline, engine, categories, config)
 VALUES (
     'physics',
-    'pygame_pymunk',
+    'blender',
     '["ball_pit", "marble_funnel", "domino_chain", "destruction"]'::JSONB,
     '{
         "sandbox_timeout_sec": 300,

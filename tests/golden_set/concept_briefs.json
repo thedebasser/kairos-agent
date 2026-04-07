@@ -6,7 +6,7 @@
     "title": "Marble Cascade Destruction",
     "visual_brief": "Hundreds of small marbles rain down onto a precarious tower of glass blocks. Each impact shatters blocks and sends fragments flying. The final wide shot shows the debris settling with satisfying physics.",
     "simulation_requirements": {
-      "engine": "pymunk",
+      "engine": "blender",
       "min_objects": 50,
       "must_include": ["gravity", "collision"],
       "target_fps": 60,
@@ -29,7 +29,7 @@
     "title": "Infinite Domino Spiral",
     "visual_brief": "A tight spiral of dominoes unfurls from the centre outward, each toppling the next in a mesmerizing chain reaction. The camera slowly zooms out as the spiral expands to fill the screen.",
     "simulation_requirements": {
-      "engine": "pymunk",
+      "engine": "blender",
       "min_objects": 200,
       "must_include": ["collision", "rotation"],
       "target_fps": 60,
@@ -52,7 +52,7 @@
     "title": "Lava Lamp Blobs",
     "visual_brief": "Soft glowing blobs rise and fall in a dark container, merging and splitting with fluid grace. Colours gradually shift through warm reds, oranges and yellows.",
     "simulation_requirements": {
-      "engine": "pymunk",
+      "engine": "blender",
       "min_objects": 30,
       "must_include": ["buoyancy", "collision"],
       "target_fps": 60,
@@ -75,7 +75,7 @@
     "title": "Newton Cradle Extreme",
     "visual_brief": "A massive Newton's cradle with 20 coloured balls transfers momentum through spectacular chain reactions. Close-up shots show the energy wave propagating. Some balls break free for dramatic effect.",
     "simulation_requirements": {
-      "engine": "pymunk",
+      "engine": "blender",
       "min_objects": 20,
       "must_include": ["collision", "momentum"],
       "target_fps": 60,
@@ -98,7 +98,7 @@
     "title": "Tower of Babel Collapse",
     "visual_brief": "A perfectly balanced tower of mixed-shape blocks grows taller with each second, defying gravity. At the climax, a single pebble lands on top and the entire structure collapses in slow motion.",
     "simulation_requirements": {
-      "engine": "pymunk",
+      "engine": "blender",
       "min_objects": 100,
       "must_include": ["gravity", "stacking", "collision"],
       "target_fps": 60,
@@ -121,7 +121,7 @@
     "title": "Bouncing Ball Frenzy",
     "visual_brief": "A single bouncing ball multiplies on each bounce, filling the screen with colourful chaos. Balls collide and ricochet off walls and each other with increasing energy.",
     "simulation_requirements": {
-      "engine": "pymunk",
+      "engine": "blender",
       "min_objects": 10,
       "must_include": ["gravity", "elasticity", "collision"],
       "target_fps": 60,
@@ -144,7 +144,7 @@
     "title": "Magnet Cluster Dance",
     "visual_brief": "Dozens of small magnetic particles are released into a field with multiple invisible attractors. They swirl, cluster, and break apart in mesmerizing patterns as the field strengths oscillate.",
     "simulation_requirements": {
-      "engine": "pymunk",
+      "engine": "blender",
       "min_objects": 60,
       "must_include": ["attraction", "collision"],
       "target_fps": 60,
@@ -167,7 +167,7 @@
     "title": "Domino Chain of Increasing Size",
     "visual_brief": "Tiny dominoes topple into progressively larger ones, starting at 1 pixel and ending building-sized. The camera pans to follow the growing cascade. Final domino crushes a small cartoon car.",
     "simulation_requirements": {
-      "engine": "pymunk",
+      "engine": "blender",
       "min_objects": 50,
       "must_include": ["collision", "scaling"],
       "target_fps": 60,
@@ -190,7 +190,7 @@
     "title": "Silk Fabric Wind Dance",
     "visual_brief": "A sheet of silk fabric is caught in swirling wind currents, draping over invisible obstacles and billowing gracefully. Soft lighting creates translucent shadow effects.",
     "simulation_requirements": {
-      "engine": "pymunk",
+      "engine": "blender",
       "min_objects": 80,
       "must_include": ["soft_body", "wind"],
       "target_fps": 60,
@@ -213,7 +213,7 @@
     "title": "Firework Particle Explosion",
     "visual_brief": "A single spark launches upward, bursting into thousands of colourful particles that cascade downward with realistic drag and fade. Multiple bursts follow in sequence.",
     "simulation_requirements": {
-      "engine": "pymunk",
+      "engine": "blender",
       "min_objects": 200,
       "must_include": ["gravity", "drag", "emission"],
       "target_fps": 60,
@@ -236,7 +236,7 @@
     "title": "Wrecking Ball Chain Reaction",
     "visual_brief": "A swinging wrecking ball smashes through a row of colourful structures, each destruction triggering the next construction collapse in a satisfying chain of ruin.",
     "simulation_requirements": {
-      "engine": "pymunk",
+      "engine": "blender",
       "min_objects": 80,
       "must_include": ["pendulum", "collision", "gravity"],
       "target_fps": 60,
@@ -259,7 +259,7 @@
     "title": "Zen Rock Balancing",
     "visual_brief": "Smooth river stones stack impossibly high in a zen garden setting, wobbling on edges. A gentle breeze animation makes them sway. Final moment: perfect stillness.",
     "simulation_requirements": {
-      "engine": "pymunk",
+      "engine": "blender",
       "min_objects": 15,
       "must_include": ["gravity", "friction", "stacking"],
       "target_fps": 60,
@@ -282,7 +282,7 @@
     "title": "Sand Funnel Vortex",
     "visual_brief": "Thousands of sand grains pour from above into a funnel shape, creating satisfying vortex patterns. The funnel overflows and sand cascades outward in all directions.",
     "simulation_requirements": {
-      "engine": "pymunk",
+      "engine": "blender",
       "min_objects": 500,
       "must_include": ["gravity", "collision", "particles"],
       "target_fps": 60,
@@ -305,7 +305,7 @@
     "title": "Ferrofluid Spike Formation",
     "visual_brief": "Dark ferrofluid responds to an invisible magnetic field, forming spiky formations that grow and collapse. Close-up view shows the liquid tips stretching upward in fractal patterns.",
     "simulation_requirements": {
-      "engine": "pymunk",
+      "engine": "blender",
       "min_objects": 40,
       "must_include": ["attraction", "surface_tension"],
       "target_fps": 60,
@@ -328,7 +328,7 @@
     "title": "Colour Mixing Waterfall",
     "visual_brief": "Three streams of primary-coloured liquid pour from the top, mixing where they collide to create secondary colours. The blended stream pours into a clear tank below, filling it with a rainbow gradient.",
     "simulation_requirements": {
-      "engine": "pymunk",
+      "engine": "blender",
       "min_objects": 100,
       "must_include": ["gravity", "fluid", "colour_mixing"],
       "target_fps": 60,

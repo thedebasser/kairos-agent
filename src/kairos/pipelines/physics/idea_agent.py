@@ -32,10 +32,6 @@ from kairos.schemas.idea import (
     ConceptDeveloperResponse,
     InventoryReport,
 )
-from kairos.ai.prompts.physics.builder import (
-    build_user_prompt,
-    load_system_prompt,
-)
 from kairos.services.category_rotation import (
     BOOST_THRESHOLD,
     CategoryInfo,
@@ -191,17 +187,22 @@ async def select_category_with_llm(
     messages = [
         {
             "role": "system",
-            "content": load_system_prompt("category_selector", {
-                "available_categories": ", ".join(PHYSICS_CATEGORIES),
-            }).text,
+            "content": (
+                "You are a content strategist for a short-form video channel. "
+                "Select the next scenario category based on rotation rules. "
+                f"Available categories: {', '.join(PHYSICS_CATEGORIES)}. "
+                "Prioritise variety, boost under-represented categories, "
+                "and avoid repeating the last used category."
+            ),
         },
         {
             "role": "user",
-            "content": build_user_prompt("category_selector", {
-                "categories_text": categories_text,
-                "last_category": report.last_category or "None (first video)",
-                "recent_sequence": str(report.recent_categories[:5] or ["None"]),
-            }).text,
+            "content": (
+                f"Category stats:\n{categories_text}\n\n"
+                f"Last category: {report.last_category or 'None (first video)'}\n"
+                f"Recent sequence: {report.recent_categories[:5] or ['None']}\n\n"
+                "Select the best category for the next video."
+            ),
         },
     ]
 
@@ -248,7 +249,7 @@ def _build_concept_developer_prompt(
             "Ball pit / collision cascade: Colourful balls filling containers, bouncing, "
             "piling up. Simple obstacles (2-4 platforms/funnels). "
             "Key appeal: satisfying bouncing, cascading colour, accumulation → overflow. "
-            "Physics: balls as pymunk.Circle, radius 15-30px, elasticity 0.7.\n"
+            "Physics: Blender Bullet rigid bodies with sphere colliders.\n"
             "PSYCHOLOGY: Tier 1 satisfaction (4+ mechanisms). Container overflow triggers "
             "Zeigarnik completion + catharsis + pattern recognition. The container "
             "MUST have a climax event (gate burst, wall collapse, overflow) — balls "
@@ -257,13 +258,13 @@ def _build_concept_developer_prompt(
         ),
         # MARBLE_FUNNEL disabled — ramp geometry needs work
         # ScenarioCategory.MARBLE_FUNNEL: ( ... ),
-        # DOMINO_CHAIN disabled — doesn't work for portrait layout
+        # DOMINO_CHAIN disabled — handled by the domino pipeline
         # ScenarioCategory.DOMINO_CHAIN: ( ... ),
         ScenarioCategory.DESTRUCTION: (
             "Destruction / tower collapse: A stable block tower hit by a wrecking ball. "
             "Simple tower (10-15 layers × 3-5 blocks). Pre-settled before recording. "
             "Key appeal: tension → dramatic collapse → debris scatter. "
-            "Physics: blocks 60-100px, mass 2.0, wrecking ball mass 80.\n"
+            "Physics: Blender Bullet rigid bodies, mass-based dynamics.\n"
             "PSYCHOLOGY: Catharsis is the primary driver — the viewer must form an "
             "emotional connection to the intact structure BEFORE destruction. Show the "
             "tower standing for 10-15s. The destruction is 'earned' through anticipation. "
@@ -279,16 +280,29 @@ def _build_concept_developer_prompt(
             break
 
     return [
-        {"role": "system", "content": load_system_prompt("concept_developer").text},
+        {
+            "role": "system",
+            "content": (
+                "You are a creative director for a short-form video channel that produces "
+                "'Oddly Satisfying' physics simulation videos using Blender 3D.\n\n"
+                "Your job is to generate original, highly satisfying video concepts that are:\n"
+                "- Visually appealing with satisfying physics interactions\n"
+                "- Technically feasible with Blender 3D (rigid body physics)\n"
+                "- Emotionally engaging with clear narrative arc\n"
+                "- Optimised for portrait format (9:16)\n\n"
+                "Generate 3 ranked concepts. The top concept should be your strongest "
+                "recommendation — prioritise FEASIBILITY over novelty."
+            ),
+        },
         {
             "role": "user",
-            "content": build_user_prompt("concept_developer", {
-                "category": category.value,
-                "category_description": category_descriptions.get(
-                    category, "Physics simulation"
-                ),
-                "existing_count": str(existing_count),
-            }).text,
+            "content": (
+                f"Category: {category.value}\n\n"
+                f"Category description:\n"
+                f"{category_descriptions.get(category, 'Physics simulation')}\n\n"
+                f"Existing videos in this category: {existing_count}\n\n"
+                "Generate 3 ranked concept ideas for this category."
+            ),
         },
     ]
 

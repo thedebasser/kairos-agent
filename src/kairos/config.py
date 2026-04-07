@@ -160,7 +160,7 @@ class Settings(BaseSettings):
 
     # --- Calibration ---
     calibration_enabled: bool = Field(
-        default=False,
+        default=True,
         description="Enable calibration knowledge-base lookups at idea-generation time.",
     )
     chromadb_host: str = "localhost"

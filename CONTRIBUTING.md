@@ -134,7 +134,7 @@ class TestValidateSimulation:
    @register_pipeline("myengine")
    class MyPipelineAdapter(PipelineAdapter):
        pipeline_name = "myengine"
-       engine_name = "blender"  # or "pymunk", etc.
+       engine_name = "blender"
        ...
    ```
 
