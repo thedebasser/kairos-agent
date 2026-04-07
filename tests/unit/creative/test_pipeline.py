@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from kairos.pipelines.domino.creative.models import (
     AgentRole,
+    CameraKeyframe,
+    CameraOutput,
     ConnectorOutput,
     ConnectorType,
     EnvironmentSpec,
     EnvironmentType,
+    FinalReviewResult,
     GroundConfig,
     LightingConfig,
     ObjectRole,
@@ -20,8 +23,10 @@ from kairos.pipelines.domino.creative.models import (
     PathSegment,
     PlacedObject,
     ResolvedConnector,
+    ReviewIssue,
     SceneManifest,
     SegmentType,
+    StepValidationResult,
     Waypoint,
 )
 from kairos.pipelines.domino.creative.pipeline import (
@@ -154,6 +159,28 @@ def _bad_connectors() -> ConnectorOutput:
     )
 
 
+def _good_camera() -> CameraOutput:
+    """Smooth camera output that passes all validation checks."""
+    kfs = [
+        CameraKeyframe(
+            frame=f * 5,
+            position=(3.0, f * 0.3, 4.0),
+            look_target=(0.0, f * 0.3, 0.0),
+        )
+        for f in range(30)
+    ]
+    return CameraOutput(keyframes=kfs, total_frames=150)
+
+
+def _mock_good_camera(pipeline: CreativePipeline) -> None:
+    """Replace the camera router with a mock that returns a good camera output,
+    and replace validate_camera to always pass.  Also mock final reviewer to pass."""
+    pipeline._camera_router.compute_trajectory = MagicMock(return_value=_good_camera())
+    pipeline._final_reviewer.review = AsyncMock(
+        return_value=FinalReviewResult(passed=True, summary="All good"),
+    )
+
+
 # ─── Happy path ──────────────────────────────────────────────────────
 
 
@@ -165,6 +192,7 @@ async def test_pipeline_success_first_attempt(tmp_path):
     pipeline._set_designer.design_scene = AsyncMock(return_value=_good_manifest())
     pipeline._path_setter.plan_path = AsyncMock(return_value=_good_path())
     pipeline._connector.resolve_connectors = AsyncMock(return_value=_good_connectors())
+    _mock_good_camera(pipeline)
 
     result = await pipeline.run(domino_count=200)
 
@@ -172,7 +200,7 @@ async def test_pipeline_success_first_attempt(tmp_path):
     assert result.manifest is not None
     assert result.path is not None
     assert result.connectors is not None
-    assert result.history.total_pipeline_attempts == 3  # one per agent
+    assert result.history.total_pipeline_attempts == 4  # one per agent (incl. camera router)
 
 
 # ─── Cascade: connector failure restarts only connector ──────────────
@@ -188,6 +216,7 @@ async def test_connector_fail_retries_only_connector(tmp_path):
     pipeline._connector.resolve_connectors = AsyncMock(
         side_effect=[_bad_connectors(), _good_connectors()],
     )
+    _mock_good_camera(pipeline)
 
     result = await pipeline.run(domino_count=200)
 
@@ -211,6 +240,7 @@ async def test_path_fail_cascades_to_path_and_connector(tmp_path):
         side_effect=[_bad_path(), _good_path()],
     )
     pipeline._connector.resolve_connectors = AsyncMock(return_value=_good_connectors())
+    _mock_good_camera(pipeline)
 
     result = await pipeline.run(domino_count=200)
 
@@ -233,6 +263,7 @@ async def test_scene_fail_cascades_all(tmp_path):
     )
     pipeline._path_setter.plan_path = AsyncMock(return_value=_good_path())
     pipeline._connector.resolve_connectors = AsyncMock(return_value=_good_connectors())
+    _mock_good_camera(pipeline)
 
     result = await pipeline.run(domino_count=200)
 
@@ -255,6 +286,7 @@ async def test_per_agent_exhaustion(tmp_path):
     pipeline._set_designer.design_scene = AsyncMock(return_value=_bad_manifest())
     pipeline._path_setter.plan_path = AsyncMock(return_value=_good_path())
     pipeline._connector.resolve_connectors = AsyncMock(return_value=_good_connectors())
+    _mock_good_camera(pipeline)
 
     result = await pipeline.run(domino_count=200)
 
@@ -275,6 +307,7 @@ async def test_session_artefacts_created(tmp_path):
     pipeline._set_designer.design_scene = AsyncMock(return_value=_good_manifest())
     pipeline._path_setter.plan_path = AsyncMock(return_value=_good_path())
     pipeline._connector.resolve_connectors = AsyncMock(return_value=_good_connectors())
+    _mock_good_camera(pipeline)
 
     await pipeline.run(domino_count=200)
 
@@ -285,3 +318,105 @@ async def test_session_artefacts_created(tmp_path):
     assert (root / "agents" / "set_designer" / "attempt_1" / "output.yaml").exists()
     assert (root / "agents" / "path_setter" / "attempt_1" / "validation.yaml").exists()
     assert (root / "agents" / "connector" / "attempt_1" / "summary.md").exists()
+
+
+# ─── Camera Router step in pipeline ─────────────────────────────────
+
+
+def _bad_camera() -> CameraOutput:
+    """Only 1 keyframe — fails has_keyframes check."""
+    return CameraOutput(
+        keyframes=[CameraKeyframe(frame=0, position=(0, 0, 0), look_target=(1, 0, 0))],
+        total_frames=100,
+    )
+
+
+@pytest.mark.asyncio
+async def test_camera_fail_retries_only_camera(tmp_path):
+    """Camera router fails once, then succeeds — only camera re-runs."""
+    pipeline = CreativePipeline(assets=[], output_dir=tmp_path, session_id="test")
+
+    pipeline._set_designer.design_scene = AsyncMock(return_value=_good_manifest())
+    pipeline._path_setter.plan_path = AsyncMock(return_value=_good_path())
+    pipeline._connector.resolve_connectors = AsyncMock(return_value=_good_connectors())
+    # Camera: fail once (1 keyframe), then good
+    pipeline._camera_router.compute_trajectory = MagicMock(
+        side_effect=[_bad_camera(), _good_camera()],
+    )
+    pipeline._final_reviewer.review = AsyncMock(
+        return_value=FinalReviewResult(passed=True, summary="All good"),
+    )
+
+    result = await pipeline.run(domino_count=200)
+
+    assert result.success
+    assert result.camera is not None
+    # Set designer, path, connector each called once
+    assert pipeline._set_designer.design_scene.call_count == 1
+    assert pipeline._path_setter.plan_path.call_count == 1
+    assert pipeline._connector.resolve_connectors.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_pipeline_success_includes_camera_and_review(tmp_path):
+    """Successful run populates camera and final_review on the result."""
+    pipeline = CreativePipeline(assets=[], output_dir=tmp_path, session_id="test")
+
+    pipeline._set_designer.design_scene = AsyncMock(return_value=_good_manifest())
+    pipeline._path_setter.plan_path = AsyncMock(return_value=_good_path())
+    pipeline._connector.resolve_connectors = AsyncMock(return_value=_good_connectors())
+    _mock_good_camera(pipeline)
+
+    result = await pipeline.run(domino_count=200)
+
+    assert result.success
+    assert result.camera is not None
+    assert result.final_review is not None
+    assert result.final_review.passed
+
+
+# ─── Final reviewer cascade ─────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_final_reviewer_fails_cascades_from_attributed_agent(tmp_path):
+    """Final reviewer failure cascades from the attributed agent."""
+    pipeline = CreativePipeline(assets=[], output_dir=tmp_path, session_id="test")
+
+    pipeline._set_designer.design_scene = AsyncMock(return_value=_good_manifest())
+    pipeline._path_setter.plan_path = AsyncMock(return_value=_good_path())
+    pipeline._connector.resolve_connectors = AsyncMock(return_value=_good_connectors())
+    pipeline._camera_router.compute_trajectory = MagicMock(return_value=_good_camera())
+
+    # First call: final reviewer fails, attributed to CONNECTOR
+    # Second call: final reviewer passes
+    call_count = {"n": 0}
+
+    async def _mock_review(*args, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return FinalReviewResult(
+                passed=False,
+                issues=[
+                    ReviewIssue(
+                        description="Chain break detected",
+                        attributed_to=AgentRole.CONNECTOR,
+                        severity="blocking",
+                    ),
+                ],
+                cascade_from=AgentRole.CONNECTOR,
+                summary="[connector] Chain break detected",
+            )
+        return FinalReviewResult(passed=True, summary="All good")
+
+    pipeline._final_reviewer.review = _mock_review
+
+    result = await pipeline.run(domino_count=200)
+
+    assert result.success
+    # Connector re-ran (cascade from CONNECTOR = [CONNECTOR, CAMERA_ROUTER])
+    assert pipeline._connector.resolve_connectors.call_count == 2
+    # Set designer and path setter didn't re-run
+    assert pipeline._set_designer.design_scene.call_count == 1
+    assert pipeline._path_setter.plan_path.call_count == 1
+

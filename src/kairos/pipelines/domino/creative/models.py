@@ -52,6 +52,8 @@ class AgentRole(str, Enum):
     SET_DESIGNER = "set_designer"
     PATH_SETTER = "path_setter"
     CONNECTOR = "connector"
+    CAMERA_ROUTER = "camera_router"
+    FINAL_REVIEWER = "final_reviewer"
 
 
 # ─── Scene Manifest (Set Designer output) ────────────────────────────
@@ -286,3 +288,79 @@ class IterationHistory(BaseModel):
             f"\nTotal pipeline attempts so far: {self.total_pipeline_attempts}"
         )
         return "\n".join(lines)
+
+
+# ─── Camera Models ───────────────────────────────────────────────────
+
+
+class CameraKeyframe(BaseModel, frozen=True):
+    """A single camera keyframe in the tracking trajectory."""
+
+    frame: int
+    position: tuple[float, float, float]
+    look_target: tuple[float, float, float]
+
+
+class OcclusionEvent(BaseModel, frozen=True):
+    """A detected occlusion between camera and wavefront."""
+
+    frame_start: int
+    frame_end: int
+    occluder: str = Field(description="Name/id of the occluding object")
+    severity: float = Field(
+        default=1.0, ge=0.0, le=1.0,
+        description="0=minor partial, 1=fully blocked",
+    )
+
+
+class CameraOutput(BaseModel, frozen=True):
+    """Camera trajectory produced by the Camera Router.
+
+    Contains keyframes for tracking + repositioning + pull-back,
+    plus any occlusion events that were resolved.
+    """
+
+    keyframes: list[CameraKeyframe] = Field(default_factory=list)
+    occlusion_events: list[OcclusionEvent] = Field(default_factory=list)
+    repositions: int = Field(default=0, description="Number of occlusion repositions")
+    follow_distance: float = Field(default=3.5)
+    camera_height: float = Field(default=4.5)
+    total_frames: int = Field(default=0)
+
+
+class CameraValidationResult(BaseModel, frozen=True):
+    """Result of camera trajectory validation."""
+
+    visibility_ratio: float = Field(
+        description="Fraction of frames where wavefront is visible (0-1)",
+    )
+    max_velocity_spike: float = Field(
+        default=0.0,
+        description="Maximum velocity relative to average (>2.0 is bad)",
+    )
+    smooth_motion: bool = Field(default=True)
+    occlusion_frames: int = Field(default=0)
+    passed: bool = Field(default=True)
+    issues: list[str] = Field(default_factory=list)
+
+
+class ReviewIssue(BaseModel, frozen=True):
+    """A single issue identified by the Final Reviewer."""
+
+    description: str
+    attributed_to: AgentRole
+    reason: str = ""
+    suggested_fix: str = ""
+    severity: str = Field(default="blocking", description="blocking | warning")
+
+
+class FinalReviewResult(BaseModel, frozen=True):
+    """Final Reviewer assessment of a complete rendered run."""
+
+    passed: bool
+    issues: list[ReviewIssue] = Field(default_factory=list)
+    cascade_from: AgentRole | None = Field(
+        default=None,
+        description="If failed, which agent to cascade re-run from",
+    )
+    summary: str = Field(default="")
