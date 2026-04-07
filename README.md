@@ -4,16 +4,16 @@
 
 LLM-powered agents orchestrated by LangGraph collaborate to produce satisfying 9:16 portrait physics videos (ball pits, domino chains, marble funnels, destruction scenes) with no human intervention required beyond a final approve/reject gate.
 
-> **Status:** Active development. 600 tests passing. Physics and domino pipelines operational.
+> **Status:** Active development. 825 tests passing. Physics, domino, and marble pipelines operational.
 
 ---
 
 ## Why This Project Exists
 
-Most "AI agent" demos are thin wrappers around a single API call. Kairos is a **genuine multi-agent system** that makes real decisions:
+Kairos is a **genuine multi-agent system** where every agent makes real decisions:
 
 - **Agents don't see each other's code.** The Idea Agent, Simulation Agent, and Video Editor are plain Python classes behind abstract interfaces. LangGraph orchestrates them, but they have zero framework dependency.
-- **Agents iterate on failure.** A simulation that fails validation triggers config adjustment (not regeneration from scratch). Video and audio quality gates route back to earlier agents when they detect problems.
+- **Agents iterate on failure.** A simulation that fails validation triggers full regeneration with accumulated error context. Video and audio quality gates route back to earlier agents when they detect problems.
 - **The system learns.** Every successful cloud LLM call is stored as training data. Category knowledge accumulates in the database. Prompts are enriched with few-shot examples from verified runs.
 - **Cost is managed.** Local Ollama models handle routine work; Claude is reserved for complex generation. Token counts and costs are tracked per-call and surfaced in traces and the dashboard.
 
@@ -33,11 +33,13 @@ graph LR
         HR --> PQ[Publish Queue]
     end
 
-    SA -. "retry / adjust" .-> SA
+    SA -. "retry" .-> SA
+    SA -. "too complex" .-> IA
     VR -. "re-simulate" .-> SA
     AR -. "re-edit" .-> VE
     HR -. "bad concept" .-> IA
     HR -. "bad sim" .-> SA
+    HR -. "bad edit" .-> VE
 
     subgraph Engines
         BL[Blender 3D]
@@ -56,20 +58,27 @@ graph LR
         LL[Learning Loop]
     end
 
-    SA --> PM
+    subgraph Calibration
+        SB[Sandbox]
+        QG[Quality Gate]
+        KB[Knowledge Base]
+    end
+
     SA --> BL
+    SA --> SB
     VE --> FF
     VE --> MUS
     VE --> CAP
     IA --> LLM
     SA --> LLM
     VR --> LLM
+    AR --> LLM
 ```
 
 ### How a Run Works
 
 1. **Idea Agent** — Analyses category stats (SQL, no LLM), selects the next category via programmatic rotation rules, then generates a `ConceptBrief` via Claude with Instructor structured output.
-2. **Simulation Agent** — LLM generates a JSON config (not raw code). A fixed template per category renders it into runnable Blender Python scripts. Executes in a Docker sandbox. Validates output. Retries up to 5 times.
+2. **Simulation Agent** — LLM generates a complete Blender Python script based on the concept brief and category constraints. Executes in a Docker sandbox. Validates output via programmatic checks. On failure, regenerates with accumulated error context. Retries up to 5 times.
 3. **Video Editor Agent** — Selects music by mood tags, generates captions, assembles the final 9:16 video via FFmpeg.
 4. **Video Review** — Vision LLM extracts frames and evaluates visual quality. Routes back to Simulation Agent if it detects problems.
 5. **Audio Review** — Omni-modal LLM + FFmpeg ebur128 loudness analysis. Routes back to Video Editor if audio is poor.
@@ -87,9 +96,10 @@ src/kairos/
 ├── orchestrator/        # LangGraph graph, state, routing logic, registry
 ├── pipelines/           # Pipeline adapters + per-pipeline agents
 │   ├── adapters/        #   @register_pipeline implementations
-│   ├── physics/         #   Blender physics agents, templates, models
-│   ├── domino/          #   Blender domino agents + models
+│   ├── physics/         #   Blender physics agents (ball pit, destruction)
+│   ├── domino/          #   Blender domino agents + creative sub-pipeline
 │   └── marble/          #   Blender marble agents + models
+├── calibration/         # Sandbox execution, quality gate, ChromaDB knowledge base
 ├── ai/                  # AI layer (no business logic)
 │   ├── llm/             #   LiteLLM routing, config, capabilities
 │   ├── tracing/         #   RunTracer, event models, sinks (JSONL, Langfuse, DB)
@@ -102,8 +112,9 @@ src/kairos/
 │   ├── audio/           #   SFX pool, Freesound, synthetic, mixing
 │   └── environment/     #   Blender environment theming
 ├── engines/             # Execution backends
-│   ├── blender/         #   Blender 3D rendering engine
-│   └── blender/         #   Blender subprocess orchestrator
+│   └── blender/         #   Blender executor, configs, environment, scripts
+├── skills/              # Domino + marble skill catalogues and contracts
+├── tools/               # Pipeline stats, prompt harness
 ├── schemas/             # All Pydantic contracts (90+ models)
 ├── db/                  # SQLAlchemy models + async operations
 ├── api/                 # FastAPI app, REST routes, WebSocket streams
@@ -154,7 +165,7 @@ pipeline resume <run-id>           # Resume interrupted run
 ### Test
 
 ```bash
-pytest tests/ -q --timeout=60     # Full suite (~600 tests)
+pytest tests/ -q --timeout=60     # Full suite (~825 tests)
 pytest tests/unit/ -m unit        # Fast unit tests only
 pytest tests/integration/         # Requires Docker services
 ```
@@ -168,7 +179,7 @@ Key architectural choices and the reasoning behind them. Full ADRs in [docs/adr/
 | Decision | Choice | Why |
 |----------|--------|-----|
 | Agent ↔ orchestrator separation | Agents are plain classes behind ABCs; LangGraph only orchestrates | Agents are testable in isolation, swappable, and have no framework lock-in |
-| Config-based simulation | LLM generates JSON configs, not raw code | Fixed templates + constrained configs reduce hallucination vs raw code generation |
+| LLM-generated Blender scripts | LLM generates complete Blender Python scripts per concept | Inline prompts with category constraints + error context on retry reduce hallucination |
 | Local-first LLM routing | Ollama for routine work, Claude for generation | ~$0.02/run vs ~$0.15/run. Cloud responses become training data for local models |
 | Pluggable tracing sinks | JSONL files + Langfuse + PostgreSQL in parallel | Files for debugging, Langfuse for dashboards, DB for queries. No single point of failure |
 | Step-level input-hash caching | Each node hashes its relevant state fields | Reruns and retries skip completed work. Cache hit = zero cost, zero latency |
@@ -182,7 +193,7 @@ Key architectural choices and the reasoning behind them. Full ADRs in [docs/adr/
 | Scenario | Typical Cost | Model Mix |
 |----------|-------------|-----------|
 | Successful physics run (no retries) | ~$0.02 | Ollama local for config, Claude for concept |
-| Physics run with 3 simulation retries | ~$0.06 | Extra config adjustment calls |
+| Physics run with 3 simulation retries | ~$0.06 | Extra generation calls with error context |
 | Full cloud-only run | ~$0.15 | All calls to Claude |
 | Eval suite (10 cases) | ~$0.30 | Concept + simulation for each |
 
@@ -226,7 +237,7 @@ Token counts and costs are tracked per-call via `_extract_usage()` and surfaced 
 | Database | PostgreSQL 16 + SQLAlchemy 2 (async) + Alembic |
 | API | FastAPI + WebSocket (live event streaming) |
 | Tracing | Custom RunTracer → JSONL files, Langfuse, PostgreSQL |
-| Testing | pytest + pytest-asyncio (600 tests, ~50s) |
+| Testing | pytest + pytest-asyncio (825 tests, ~50s) |
 | Config | pydantic-settings from `.env` |
 
 ---
